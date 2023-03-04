@@ -64,8 +64,51 @@ For most other uses, aforementioned rdiff_ and rsync_ tools might be good enough
 (see rsync's --partial, --inplace and --append-verify opts in particular) - make
 sure to look at those first.
 
+**Non-goals** for this tool:
+
+- Deduplication within files and between chunks of files at different offsets.
+
+  That's what rdiff/rsync/xdelta tools do, and it creates technical requirements
+  in direct conflict with how this tool works, as outlined above.
+
+- Any kind of permissions and file metadata - only file contents are synchronized.
+
+- Anything to do with multiple files/directories on a filesystem - works between
+  one explicitly-specified src/dst paths directly, and that's it.
+
+  casync_ and various incremental backup solutions are usually good for that.
+
+- Making smallest-possible separate binary patches - see xdelta3_ and
+  compression tools.
+
+- Network transmission/protocols or related optimizations.
+
+  It's possible to ``rsync -S`` a sparse file delta, or use path on a network
+  filesystem as a sync destination, but there's nothing beyond that.
+
+- Compression - nothing is compressed/decompressed by the tool itself.
+
+- Data integrity/secrecy in adversarial contexts and such security stuff.
+
+  Malicious tampering with the inputs/outputs is not considered here,
+  use separate auth/encryption to prevent that as necessary.
+
+  Simple "compare blocks" design makes it optimal for syncing encrypted
+  devices/images/filesystems (e.g. LUKS volumes), with no time wasted on finding
+  similar or relocated data (impossible with any half-decent encryption system)
+  or trying to compress uniformly-random encrypted blocks.
+
+- Syncing deltas from files with immutable source instead of immutable destination.
+
+  That's more into zsync_ and bittorrent_ territory, i.e. file-sharing tools.
+
+
 .. _rsync: https://rsync.samba.org/
 .. _rdiff: https://librsync.github.io/page_rdiff.html
 .. _btrfs: https://btrfs.wiki.kernel.org/index.php/Main_Page
 .. _bmaptool: https://github.com/intel/bmap-tools
 .. _bmap-tools: https://manpages.debian.org/testing/bmap-tools/bmaptool.1.en.html
+.. _casync: https://github.com/systemd/casync
+.. _xdelta3: http://xdelta.org/
+.. _zsync: http://zsync.moria.org.uk/
+.. _bittorrent: https://en.wikipedia.org/wiki/BitTorrent
