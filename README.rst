@@ -3,8 +3,8 @@ Incremetal Disk (or VM-image/big-file) Compare And Sync tool (idcas)
 
 **Not Usable**: this project is under development, do not use it yet.
 
-Tool to build/maintain a hash-map of source file/dev/image blocks,
-to later update those blocks in-place in a destination copy efficiently.
+Tool to build/maintain hash-map of a file/dev/img blocks, to later update
+those in-place in a destination copy efficiently, as they change in source.
 
 This is somewhat similar to how common rsync_ and rdiff_ tools work,
 but much simplier, side-stepping following limitations imposed by those:
@@ -94,14 +94,13 @@ sure to look at those first.
   use separate auth/encryption to prevent that as necessary.
 
   Simple "compare blocks" design makes it optimal for syncing encrypted
-  devices/images/filesystems (e.g. LUKS volumes), with no time wasted on finding
+  devices/imgs/filesystems (e.g. LUKS volumes), with no time wasted on finding
   similar or relocated data (impossible with any half-decent encryption system)
   or trying to compress uniformly-random encrypted blocks.
 
 - Syncing deltas from files with immutable source instead of immutable destination.
 
   That's more into zsync_ and bittorrent_ territory, i.e. file-sharing tools.
-
 
 .. _rsync: https://rsync.samba.org/
 .. _rdiff: https://librsync.github.io/page_rdiff.html
@@ -112,3 +111,18 @@ sure to look at those first.
 .. _xdelta3: http://xdelta.org/
 .. _zsync: http://zsync.moria.org.uk/
 .. _bittorrent: https://en.wikipedia.org/wiki/BitTorrent
+
+
+Build
+-----
+
+This tool is written in Nim_ C-adjacent language, linked against openssl_.
+
+Build it with: ``nim c -d:production -o=idcas idcas.nim && strip idcas``
+
+Test and usage info: ``./idcas -h``
+
+Installation: copy to anywhere you can/intend-to run it from.
+
+.. _Nim: https://nim-lang.org/
+.. _openssl: https://www.openssl.org/
