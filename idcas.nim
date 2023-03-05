@@ -62,7 +62,7 @@ proc main_help(err="") =
 			## Make full initial backup-copy of some virtual machine image file
 			## Same thing as "cp", but also auto-generates hash-map-file while copying it
 				% {app} vm.img /mnt/usb-hdd/vm.img.bak
-			## ...then VM runs and stuff changes in vm.img after this
+			## ...VM runs and stuff changes in vm.img after this
 
 			## Make date/time-suffixed btrfs copy-on-write snapshot of vm.img backup
 				% cp --reflink /mnt/usb-hdd/vm.img.bak{{,.$(date -Is)}}
@@ -107,19 +107,22 @@ proc main_help(err="") =
 				Hashes for these blocks are loaded and compared/updated when
 					large-block hash doesn't match, to find which of those to update.
 				Default: {IDCAS_SBS} bytes (compile-time IDCAS_SBS option)
+
+			-v/--verbose
+				Print transfer statistics to stdout before exiting.
 		""")
-	# XXX: -v option to check file w/o updating anything
-	# XXX: option to check file w/o updating anything
+	# XXX: add options to check file w/o updating anything
 	quit 0
 
 proc main(argv: seq[string]) =
 	var
+		opt_src = ""
+		opt_dst = ""
 		opt_hm_file = ""
 		opt_hm_update = false
 		opt_lbs = IDCAS_LBS
 		opt_sbs = IDCAS_SBS
-		opt_src = ""
-		opt_dst = ""
+		opt_verbose = false
 
 	block cli_parser:
 		var opt_last = ""
@@ -141,6 +144,7 @@ proc main(argv: seq[string]) =
 			of cmdShortOption, cmdLongOption:
 				if opt in ["h", "help"]: main_help()
 				elif opt in ["M", "hash-map-update"]: opt_hm_update = true
+				elif opt in ["v", "verbose"]: opt_verbose = true
 				elif val == "": opt_empty_check(); opt_last = opt
 				else: opt_set(opt, val)
 			of cmdArgument:
@@ -313,9 +317,10 @@ proc main(argv: seq[string]) =
 				dst_sz_diff = if dst_sz_bs > 0: "+" else: "-"
 				dst_sz_diff = &" [{dst_sz_diff}{abs(dst_sz_bs).sz}]"
 
-		echo( &"Stats: {src.getFilePos.sz} file{dst_sz_diff}" &
-			&" + {hm.getFilePos.sz} hash-map :: {st_lb_chk} LBs," &
-			&" {st_lb_upd} updated :: {st_sb_chk} SBs compared," &
-			&" {st_sb_upd} copied :: {(st_sb_upd * opt_sbs).sz} written" )
+		if opt_verbose:
+			echo( &"Stats: {src.getFilePos.sz} file{dst_sz_diff}" &
+				&" + {hm.getFilePos.sz} hash-map :: {st_lb_chk} LBs," &
+				&" {st_lb_upd} updated :: {st_sb_chk} SBs compared," &
+				&" {st_sb_upd} copied :: {(st_sb_upd * opt_sbs).sz} written" )
 
 when is_main_module: main(os.commandLineParams())
