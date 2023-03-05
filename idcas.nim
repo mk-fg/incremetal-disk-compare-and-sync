@@ -4,15 +4,63 @@
 # Final build: nim c -d:production -o=idcas idcas.nim && strip idcas
 # Usage info: ./idcas -h
 
-import strformat, strutils, parseopt, os
+import strformat, strutils, parseopt, os, posix
 
 
 {.passl: "-lcrypto"}
 
+const IDCAS_MAGIC {.strdefine.} = "idcas-hash-map-1 "
 const IDCAS_HM_EXT {.strdefine.} = ".idcas" # default hashmap-file suffix
-const IDCAS_LBS {.strdefine.} = 4194304 # large blocks to check for initial mismatches
-const IDCAS_SBS {.strdefine.} = 4096 # blocks to compare/copy on LBS mismatch
+const IDCAS_LBS {.intdefine.} = 4194304 # large blocks to check for initial mismatches
+const IDCAS_SBS {.intdefine.} = 32768 # blocks to compare/copy on LBS mismatch
 
+
+### File readBytes/writeBytes helpers
+
+proc arr_str(src: openArray[byte], length=0, offset=0): string =
+	let len_max = src.len - offset
+	result = newString(if length > 0 and length <= len_max: length else: len_max)
+	copyMem(result[offset].addr, src[offset].unsafeAddr, result.len)
+
+proc str_arr(src: string, length=0, offset=0): seq[byte] =
+	let len_max = src.len - offset
+	result = newSeq[byte](if length > 0 and length <= len_max: length else: len_max)
+	copyMem(result[0].addr, src[offset].unsafeAddr, result.len)
+
+proc beuint32_arr(n: int): array[4, byte] = cast[array[4, byte]](n.uint32.htonl)
+proc arr_beuint32(src: openArray[byte], offset=0): int =
+	result = int(src[offset]) shl 24 or int(src[offset+1]) shl 16 or int(src[offset+2]) shl 8 or int(src[offset+3])
+
+proc beuint32_splice(n: int, s: openArray[byte], offset=0) =
+	if s.len - offset < 4:
+		raise newException(ValueError, &"Out-of-bounds splice ({offset}/{s.len-4})")
+	var n_beuint32 = n.uint32.htonl
+	copyMem(s[offset].unsafeAddr, n_beuint32.unsafeAddr, 4)
+
+
+### OpenSSL BLAKE2s hash wrapper
+
+type EVP_MD = distinct pointer
+proc EVP_blake2s256: EVP_MD {.importc, header: "<openssl/evp.h>".}
+proc EVP_Digest(
+	data: cstring, data_len: cint, digest: cstring, digest_len: ptr cint,
+	md: EVP_MD, engine: pointer ): cint {.importc, header: "<openssl/evp.h>".}
+
+type DigestError = object of CatchableError
+
+var # these should always be used immediately anyway
+	blake2_digest = newString(32)
+	blake2_len: cint = 0
+	md = EVP_blake2s256()
+proc blake2(data: string): string =
+	let res = EVP_Digest( data.cstring, data.len.cint,
+		blake2_digest.cstring, blake2_len.addr, md, nil )
+	if res != 1'i32 or blake2_len != 32'i32:
+		raise newException(DigestError, "EVP_Digest call failed")
+	return blake2_digest
+
+
+### Main routine
 
 proc main_help(err="") =
 	proc print(s: string) =
@@ -66,7 +114,7 @@ proc main_help(err="") =
 				Created if missing (without -M/--hash-map-update), updated in-place otherwise.
 
 			-M/--hash-map-update
-				Exit with error code and message if -m/--hash-map file does not exists.
+				Exit with error code and message if -m/--hash-map file does not exist or invalid.
 				This is intended to be used in scripts, where missing file might indicate a bug.
 
 			-B/--block-large <bytes>
@@ -82,7 +130,6 @@ proc main_help(err="") =
 				Default: {IDCAS_SBS} bytes (compile-time IDCAS_SBS option)
 		""")
 	quit 0
-
 
 proc main(argv: seq[string]) =
 	var
@@ -128,7 +175,62 @@ proc main(argv: seq[string]) =
 			opt_dst = opt_src; opt_src = ""
 		if opt_hm_file == "":
 			opt_hm_file = &"{opt_dst}{IDCAS_HM_EXT}"
+		if opt_lbs %% opt_sbs != 0:
+			main_help("Large/small block sizes mismatch - must be divisible")
 
-	# XXX: actually implement this
+
+	var
+		# XXX: src
+		dst: FIle
+		hm: FIle
+
+	let hm_fd = open(opt_hm_file, O_CREAT or O_RDWR, 0o600)
+	if hm_fd < 0 or not hm.open(hm_fd, fmReadWriteExisting):
+		quit(&"ERROR: Failed to open/create hash-map-file: {opt_hm_file}")
+	defer: hm.close()
+	if not dst.open(opt_dst): # XXX: open for writing if src is used
+		quit(&"ERROR: Failed to open dst-file: {opt_dst}")
+	defer: dst.close()
+
+
+	# Check if header matches all options, or replace it and zap the file
+	block hm_header_skip:
+		hm.setFilePos(0)
+
+		const
+			n_magic = IDCAS_MAGIC.len
+			n_hdr = n_magic + 10
+		var hdr_code = str_arr(IDCAS_MAGIC & "=lbs =sbs ")
+		beuint32_splice(opt_lbs, hdr_code, n_magic)
+		beuint32_splice(opt_lbs, hdr_code, n_magic + 5)
+
+		block hm_header_match:
+			var hdr_file: array[n_hdr, byte]
+			if hm.readBytes(hdr_file, 0, n_hdr) == n_hdr and
+				hdr_file == hdr_code: break
+			if opt_hm_update:
+				quit(&"ERROR: hash-map-file header mismatch: {opt_hm_file}")
+
+			block hm_header_replace:
+				hm.setFilePos(0)
+				if hm.writeBytes(hdr_code, 0, n_hdr) == n_hdr and
+					ftruncate(hm_fd, n_hdr) == 0: break
+				quit(&"ERROR: Failed to replace hash-map-file header: {opt_hm_file}")
+
+
+	block copy_blocks:
+		var
+			buff_lbs = newSeq[byte](opt_lbs)
+			buff_sbs = newSeq[byte](opt_sbs)
+			bs = 0
+		while true:
+			bs = dst.readBytes(buff_lbs, 0, opt_lbs)
+			if bs < opt_lbs:
+				if dst.endOfFile: break
+				else: quit("ERROR: File read failed")
+
+		# XXX: read blocks, write to a file
+		# XXX: maybe use mmap'ed hash-map-file
+		# XXX: actually implement this
 
 when is_main_module: main(os.commandLineParams())
