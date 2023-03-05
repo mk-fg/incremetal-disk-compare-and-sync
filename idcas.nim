@@ -81,11 +81,10 @@ proc main_help(err="") =
 				If not specified, hash-map-file for dst-file is created/updated, nothing copied.
 
 			dst-file
-				Destination file to update in-place, according to hash-map-file,
-					if it exists, or otherwise fully copy from src-file (if specified).
-				If only one file argument is specified,
-					it is assumed to be a dst-file to create/update hash-map-file for,
-					instead of copying file contents in any way.
+				Destination file to update in-place from src-file according to hash-map-file
+					(if it exists), or otherwise do a full copy from src-file to it (if specified).
+				If only one file argument is passed, it is assumed to be a dst-file
+					to create/update hash-map-file for, instead of copying file contents in any way.
 
 			-m/--hash-map hash-map-file
 				Hash-map file to read/create/update in-place, as needed.
@@ -108,6 +107,15 @@ proc main_help(err="") =
 					large-block hash doesn't match, to find which of those to update.
 				Default: {IDCAS_SBS} bytes (compile-time IDCAS_SBS option)
 
+			-c/--check
+				Check specified dst-file against hash-map-file, without
+					updating it, and exit immediately on any mismatch with non-zero status.
+				Only single dst-file argument is allowed with this option. No output.
+
+			-C/--check-full
+				Similar to -c/--check, but checks all hash-map blocks in the file,
+					and prints stats about amount of mismatches if -v/--verbose option is also used.
+
 			-v/--verbose
 				Print transfer statistics to stdout before exiting.
 		""")
@@ -123,6 +131,8 @@ proc main(argv: seq[string]) =
 		opt_lbs = IDCAS_LBS
 		opt_sbs = IDCAS_SBS
 		opt_verbose = false
+		opt_check = false
+		opt_check_full = false
 
 	block cli_parser:
 		var opt_last = ""
@@ -145,6 +155,8 @@ proc main(argv: seq[string]) =
 				if opt in ["h", "help"]: main_help()
 				elif opt in ["M", "hash-map-update"]: opt_hm_update = true
 				elif opt in ["v", "verbose"]: opt_verbose = true
+				elif opt in ["c", "check"]: opt_check = true
+				elif opt in ["C", "check-full"]: opt_check_full = true
 				elif val == "": opt_empty_check(); opt_last = opt
 				else: opt_set(opt, val)
 			of cmdArgument:
@@ -162,6 +174,8 @@ proc main(argv: seq[string]) =
 			opt_hm_file = &"{opt_dst}{IDCAS_HM_EXT}"
 		if opt_lbs %% opt_sbs != 0:
 			main_help("Large/small block sizes mismatch - must be divisible")
+		if (opt_check or opt_check_full) and opt_src != "":
+			main_help("Check options only work with a single file argument")
 
 
 	const
@@ -209,7 +223,8 @@ proc main(argv: seq[string]) =
 			var hdr_file: array[hm_hdr_len, byte]
 			if hm.readBytes(hdr_file, 0, hm_hdr_len) == hm_hdr_len and
 				hdr_file == hdr_code: break
-			if opt_hm_update:
+			if opt_check: quit(1)
+			if opt_check_full or opt_hm_update:
 				quit(&"ERROR: hash-map-file header mismatch: {opt_hm_file}")
 
 			block hm_header_replace:
@@ -268,6 +283,7 @@ proc main(argv: seq[string]) =
 			block block_update:
 				sbs = hm.readBytes(hm_blk, 0, hm_blk_len)
 				if sbs == hm_blk_len and hash_cmp(hm_blk[0], hm_blk_new[0]): break
+				if opt_check: quit(1)
 				if sbs < hm_blk_len: zeroMem(hm_blk[sbs].addr, hm_blk_len - sbs)
 				st_lb_upd += 1
 
@@ -296,15 +312,18 @@ proc main(argv: seq[string]) =
 						if dst.writeBytes(buff_lbs, opt_sbs * n, sbs_len) != sbs_len:
 							quit(&"ERROR: Failed to replace dst-file SB {st_lb_chk}.{n} [at {sbs_pos}]")
 
-				hm.setFilePos(hm_blk_pos)
-				if hm.writeBytes(hm_blk_new, 0, hm_blk_len) != hm_blk_len:
-					quit(&"ERROR: Failed to replace hash-map-file block [at {hm_blk_pos}]")
+				if not opt_check_full:
+					hm.setFilePos(hm_blk_pos)
+					if hm.writeBytes(hm_blk_new, 0, hm_blk_len) != hm_blk_len:
+						quit(&"ERROR: Failed to replace hash-map-file block [at {hm_blk_pos}]")
 
 			lbs_pos += opt_lbs
 			hm_blk_pos += hm_blk_len
 
-		if hm_fd.ftruncate(hm.getFilePos.int) != 0:
-			quit(&"ERROR: Failed to truncate hash-map-file")
+		if opt_check: quit(0)
+		if not opt_check_full:
+			if hm_fd.ftruncate(hm.getFilePos.int) != 0:
+				quit(&"ERROR: Failed to truncate hash-map-file")
 
 		var dst_sz_diff = ""
 		if dst != nil:
