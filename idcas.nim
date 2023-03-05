@@ -61,16 +61,16 @@ proc main_help(err="") =
 
 			## Make full initial backup-copy of some virtual machine image file
 			## Same thing as "cp", but also auto-generates hash-map-file while copying it
-				% {app} vm.img /mnt/ext-hdd/vm.img
-			## ...VM runs and stuff changes in vm.img after this
+				% {app} vm.img /mnt/usb-hdd/vm.img.bak
+			## ...then VM runs and stuff changes in vm.img after this
 
 			## Make date/time-suffixed btrfs copy-on-write snapshot of vm.img backup
-				% cp --reflink /mnt/ext-hdd/vm.img{{,.$(date -Is)}}
-			## Efficiently update vm.img file, overwriting only changed blocks in-place
-				% {app} vm.img /mnt/ext-hdd/vm.img
+				% cp --reflink /mnt/usb-hdd/vm.img.bak{{,.$(date -Is)}}
+			## Efficiently update vm.img.bak file, overwriting only changed blocks in-place
+				% {app} -v vm.img /mnt/usb-hdd/vm.img.bak
 			## ...and so on - block devices or sparse files can also be used here
 
-		Hash-map file in this example is generated/updated as /mnt/ext-hdd/vm.img{IDCAS_HM_EXT}
+		Hash-map file example is generated/updated as /mnt/usb-hdd/vm.img.bak{IDCAS_HM_EXT}
 		Hash function used in hash-map-file is always 32B BLAKE2s from openssl.
 
 		Input/output options:
@@ -108,6 +108,8 @@ proc main_help(err="") =
 					large-block hash doesn't match, to find which of those to update.
 				Default: {IDCAS_SBS} bytes (compile-time IDCAS_SBS option)
 		""")
+	# XXX: -v option to check file w/o updating anything
+	# XXX: option to check file w/o updating anything
 	quit 0
 
 proc main(argv: seq[string]) =
@@ -162,17 +164,33 @@ proc main(argv: seq[string]) =
 		hm_magic_len = IDCAS_MAGIC.len
 		hm_hdr_len = hm_magic_len + 10
 	var
-		# XXX: src
-		dst: FIle
+		src: File
+		dst: FIle # nil if only one file is specified
+		dst_fd: FileHandle
+		dst_sz: int64
 		hm: FIle
+		hm_fd: FileHandle
 
-	let hm_fd = open(opt_hm_file.cstring, O_CREAT or O_RDWR, 0o600)
+	hm_fd = open(opt_hm_file.cstring, O_CREAT or O_RDWR, 0o600)
 	if hm_fd < 0 or not hm.open(hm_fd, fmReadWriteExisting):
 		quit(&"ERROR: Failed to open/create hash-map-file: {opt_hm_file}")
 	defer: hm.close()
-	if not dst.open(opt_dst): # XXX: open for writing if src is used
-		quit(&"ERROR: Failed to open dst-file: {opt_dst}")
-	defer: dst.close()
+
+	if opt_src != "":
+		if not src.open(opt_src):
+			quit(&"ERROR: Failed to open src-file: {opt_src}")
+		dst_fd = open(opt_dst.cstring, O_CREAT or O_RDWR, 0o600)
+		if dst_fd < 0 or not dst.open(dst_fd, fmReadWriteExisting):
+			quit(&"ERROR: Failed to open dst-file: {opt_dst}")
+		dst_sz = dst.getFileSize
+
+	else:
+		if not src.open(opt_dst):
+			quit(&"ERROR: Failed to open dst-file: {opt_dst}")
+
+	defer:
+		if src == nil: src.close()
+		if dst == nil: dst.close()
 
 
 	# Check if header matches all options, or replace it and zap the file
@@ -200,9 +218,10 @@ proc main(argv: seq[string]) =
 		var
 			buff_lbs = newSeq[byte](opt_lbs)
 			bs: int
-			eof = false
+			lbs_pos: int64 = 0
 			sbs: int
 			sbs_len: int
+			eof = false
 
 			bh_len: cint
 			bh_res: cint
@@ -232,14 +251,14 @@ proc main(argv: seq[string]) =
 			formatSize(v, includeSpace=true).replacef(re"(\.\d)\d+", "$1")
 
 		while not eof:
-			bs = dst.readBytes(buff_lbs, 0, opt_lbs)
+			bs = src.readBytes(buff_lbs, 0, opt_lbs)
 			if bs < opt_lbs:
-				eof = dst.endOfFile
+				eof = src.endOfFile
 				if not eof: quit("ERROR: File read failed")
 				if bs == 0: continue
 
 			hash_block( buff_lbs[0], bs.cint, hm_blk_new[0],
-				&"ERROR: Hashing failed on LB#{st_lb_chk} [{bs.sz} at {dst.getFilePos-bs}]" )
+				&"ERROR: Hashing failed on LB#{st_lb_chk} [{bs.sz} at {src.getFilePos-bs}]" )
 			st_lb_chk += 1
 
 			block block_update:
@@ -266,20 +285,37 @@ proc main(argv: seq[string]) =
 
 					if hash_cmp(hm_blk[sbs], hm_blk_new[sbs]): continue
 					st_sb_upd += 1
-					# XXX: copy src->dst SB here, use sbs_len
+
+					if dst != nil:
+						let sbs_pos = lbs_pos + opt_sbs * n
+						dst.setFilePos(sbs_pos)
+						if dst.writeBytes(buff_lbs, opt_sbs * n, sbs_len) != sbs_len:
+							quit(&"ERROR: Failed to replace dst-file SB {st_lb_chk}.{n} [at {sbs_pos}]")
 
 				hm.setFilePos(hm_blk_pos)
 				if hm.writeBytes(hm_blk_new, 0, hm_blk_len) != hm_blk_len:
 					quit(&"ERROR: Failed to replace hash-map-file block [at {hm_blk_pos}]")
 
+			lbs_pos += opt_lbs
 			hm_blk_pos += hm_blk_len
 
-		if hm_fd.ftruncate(int(hm.getFilePos)) != 0:
+		if hm_fd.ftruncate(hm.getFilePos.int) != 0:
 			quit(&"ERROR: Failed to truncate hash-map-file")
-		# XXX: ftruncate() dst to src len, log length change(s) in stats
 
-		echo( &"Stats: {dst.getFilePos.sz} file + {hm.getFilePos.sz} hash-map ::" &
-			&" {st_lb_chk} LBs, {st_lb_upd} updated :: {st_sb_chk} SBs" &
-			&" compared, {st_sb_upd} copied :: {(st_sb_upd * opt_sbs).sz} written" )
+		var dst_sz_diff = ""
+		if dst != nil:
+			let
+				src_sz = src.getFilePos
+				dst_sz_bs = src_sz - dst_sz
+			if dst_fd.ftruncate(src_sz.int) != 0:
+				quit(&"ERROR: Failed to truncate dst-file")
+			if dst_sz_bs != 0:
+				dst_sz_diff = if dst_sz_bs > 0: "+" else: "-"
+				dst_sz_diff = &" [{dst_sz_diff}{abs(dst_sz_bs).sz}]"
+
+		echo( &"Stats: {src.getFilePos.sz} file{dst_sz_diff}" &
+			&" + {hm.getFilePos.sz} hash-map :: {st_lb_chk} LBs," &
+			&" {st_lb_upd} updated :: {st_sb_chk} SBs compared," &
+			&" {st_sb_upd} copied :: {(st_sb_upd * opt_sbs).sz} written" )
 
 when is_main_module: main(os.commandLineParams())
