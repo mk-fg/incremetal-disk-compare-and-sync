@@ -39,10 +39,12 @@ proc EVP_Digest(
 	md: EVP_MD, engine: pointer ): cint {.importc, header: "<openssl/evp.h>".}
 
 
-### Main routines
+### Main stuff
 
 proc sz(v: int|int64): string =
 	formatSize(v, includeSpace=true).replacef(re"(\.\d)\d+", "$1")
+
+proc err_quit(s: string) = quit "ERROR: " & s
 
 proc main_help(err="") =
 	proc print(s: string) =
@@ -191,22 +193,22 @@ proc main(argv: seq[string]) =
 
 	hm_fd = open(opt_hm_file.cstring, O_CREAT or O_RDWR, 0o600)
 	if hm_fd < 0 or not hm.open(hm_fd, fmReadWriteExisting):
-		quit &"ERROR: Failed to open/create hash-map-file: {opt_hm_file}"
-	defer: hm.close()
+		err_quit &"Failed to open/create hash-map-file: {opt_hm_file}"
+	defer: hm.close
 
 	if opt_src != "":
 		if not src.open(opt_src):
-			quit &"ERROR: Failed to open src-file: {opt_src}"
+			err_quit &"Failed to open src-file: {opt_src}"
 		dst_fd = open(opt_dst.cstring, O_CREAT or O_RDWR, 0o600)
 		if dst_fd < 0 or not dst.open(dst_fd, fmReadWriteExisting):
-			quit &"ERROR: Failed to open dst-file: {opt_dst}"
+			err_quit &"Failed to open dst-file: {opt_dst}"
 		dst_sz = dst.getFileSize
 
 	else:
 		if not src.open(opt_dst):
-			quit &"ERROR: Failed to open dst-file: {opt_dst}"
+			err_quit &"Failed to open dst-file: {opt_dst}"
 
-	defer: src.close(); dst.close()
+	defer: src.close; dst.close
 
 
 	# Check if header matches all options, or replace it and zap the file
@@ -227,13 +229,13 @@ proc main(argv: seq[string]) =
 				hdr_file == hdr_code: break
 			if opt_check: quit 1
 			if opt_check_full or opt_hm_update:
-				quit &"ERROR: hash-map-file header mismatch: {opt_hm_file}"
+				err_quit &"hash-map-file header mismatch: {opt_hm_file}"
 
 			block hm_hdr_replace:
 				hm.setFilePos(0)
 				if hm.writeBytes(hdr_code, 0, hm_hdr_len) == hm_hdr_len and
 					hm_fd.ftruncate(hm_hdr_len) == 0: break
-				quit &"ERROR: Failed to replace hash-map-file header: {opt_hm_file}"
+				err_quit &"Failed to replace hash-map-file header: {opt_hm_file}"
 
 
 	# Scan and update file blocks
@@ -264,7 +266,7 @@ proc main(argv: seq[string]) =
 
 	template hash_block(src: byte, src_len: cint, dst: byte, err_msg: string) =
 		bh_res = EVP_Digest(src.addr, src_len, dst.addr, bh_len.addr, bh_md, nil)
-		if bh_res != 1'i32 or bh_len != bh_md_len.cint: quit err_msg
+		if bh_res != 1'i32 or bh_len != bh_md_len.cint: err_quit err_msg
 
 	template hash_cmp(s1, s2: byte): bool =
 		cmpMem(s1.addr, s2.addr, bh_md_len) == 0
@@ -273,14 +275,14 @@ proc main(argv: seq[string]) =
 		bs = src.readBytes(buff_lbs, 0, opt_lbs)
 		if bs < opt_lbs:
 			eof = src.endOfFile
-			if not eof: quit "ERROR: File read failed"
+			if not eof: err_quit "File read failed"
 			if bs == 0: continue
 
 		hash_block( buff_lbs[0], bs.cint, hm_blk_new[0],
-			&"ERROR: Hashing failed on LB#{st_lb_chk} [{bs.sz} at {src.getFilePos-bs}]" )
+			&"Hashing failed on LB#{st_lb_chk} [{bs.sz} at {src.getFilePos-bs}]" )
 		st_lb_chk += 1
 
-		block lb_update:
+		block lb_check_update:
 			sbs = hm.readBytes(hm_blk, 0, hm_blk_len)
 			if sbs == hm_blk_len and hash_cmp(hm_blk[0], hm_blk_new[0]): break
 			if opt_check: quit 1
@@ -296,11 +298,11 @@ proc main(argv: seq[string]) =
 				if bs < 0: sbs_len += bs # short SB at EOF
 
 				hash_block( buff_lbs[opt_sbs * n], sbs_len.cint, hm_blk_new[sbs],
-					&"ERROR: Hashing failed on SB#{n} in LB#{st_lb_chk}" )
+					&"Hashing failed on SB#{n} in LB#{st_lb_chk}" )
 				while true: # hm_blk_zero is used to indicate missing SB - rehash if it pops-up
 					if not hash_cmp(hm_blk_new[sbs], hm_blk_zero[0]): break
 					hash_block( hm_blk_new[sbs], bh_md_len.cint, hm_blk_new[sbs],
-						&"ERROR: Re-hashing failed on SB#{n} in LB#{st_lb_chk}" )
+						&"Re-hashing failed on SB#{n} in LB#{st_lb_chk}" )
 				st_sb_chk += 1
 
 				if hash_cmp(hm_blk[sbs], hm_blk_new[sbs]): continue
@@ -310,12 +312,12 @@ proc main(argv: seq[string]) =
 					let sbs_pos = lbs_pos + opt_sbs * n
 					dst.setFilePos(sbs_pos)
 					if dst.writeBytes(buff_lbs, opt_sbs * n, sbs_len) != sbs_len:
-						quit &"ERROR: Failed to replace dst-file SB {st_lb_chk}.{n} [at {sbs_pos}]"
+						err_quit &"Failed to replace dst-file SB {st_lb_chk}.{n} [at {sbs_pos}]"
 
 			if not opt_check_full:
 				hm.setFilePos(hm_blk_pos)
 				if hm.writeBytes(hm_blk_new, 0, hm_blk_len) != hm_blk_len:
-					quit &"ERROR: Failed to replace hash-map-file block [at {hm_blk_pos}]"
+					err_quit &"Failed to replace hash-map-file block [at {hm_blk_pos}]"
 
 		lbs_pos += opt_lbs
 		hm_blk_pos += hm_blk_len
@@ -326,7 +328,7 @@ proc main(argv: seq[string]) =
 	if opt_check: quit 0
 	if not opt_check_full:
 		if hm_fd.ftruncate(hm.getFilePos.int) != 0:
-			quit &"ERROR: Failed to truncate hash-map-file"
+			err_quit &"Failed to truncate hash-map-file"
 
 	var dst_sz_diff = ""
 	if dst != nil:
@@ -334,7 +336,7 @@ proc main(argv: seq[string]) =
 			src_sz = src.getFilePos
 			dst_sz_bs = src_sz - dst_sz
 		if dst_fd.ftruncate(src_sz.int) != 0:
-			quit &"ERROR: Failed to truncate dst-file"
+			err_quit &"Failed to truncate dst-file"
 		if dst_sz_bs != 0:
 			dst_sz_diff = if dst_sz_bs > 0: "+" else: "-"
 			dst_sz_diff = &" [{dst_sz_diff}{abs(dst_sz_bs).sz}]"
