@@ -39,7 +39,10 @@ proc EVP_Digest(
 	md: EVP_MD, engine: pointer ): cint {.importc, header: "<openssl/evp.h>".}
 
 
-### Main routine
+### Main routines
+
+proc sz(v: int|int64): string =
+	formatSize(v, includeSpace=true).replacef(re"(\.\d)\d+", "$1")
 
 proc main_help(err="") =
 	proc print(s: string) =
@@ -99,13 +102,13 @@ proc main_help(err="") =
 				Block size to store/update and initially compare for performance reasons, in bytes.
 				It must always be a multiple of --block-small sizes, which are
 					actually compared and copied upon hash mismatch in these large blocks.
-				Default: {IDCAS_LBS} bytes (compile-time IDCAS_LBS option)
+				Default: {IDCAS_LBS} ({IDCAS_LBS.sz}, compile-time IDCAS_LBS option)
 
 			-b/--block-small <bytes>
 				Smallest block size to compare and store hash for in hash-map-file.
 				Hashes for these blocks are loaded and compared/updated when
 					large-block hash doesn't match, to find which of those to update.
-				Default: {IDCAS_SBS} bytes (compile-time IDCAS_SBS option)
+				Default: {IDCAS_SBS} bytes ({IDCAS_SBS.sz}, compile-time IDCAS_SBS option)
 
 			-c/--check
 				Check specified dst-file against hash-map-file, without
@@ -119,7 +122,6 @@ proc main_help(err="") =
 			-v/--verbose
 				Print transfer statistics to stdout before exiting.
 		""")
-	# XXX: add options to check file w/o updating anything
 	quit 0
 
 proc main(argv: seq[string]) =
@@ -265,9 +267,6 @@ proc main(argv: seq[string]) =
 
 		template hash_cmp(s1, s2: byte): bool =
 			cmpMem(s1.addr, s2.addr, bh_md_len) == 0
-
-		proc sz(v: int|int64): string =
-			formatSize(v, includeSpace=true).replacef(re"(\.\d)\d+", "$1")
 
 		while not eof:
 			bs = src.readBytes(buff_lbs, 0, opt_lbs)
