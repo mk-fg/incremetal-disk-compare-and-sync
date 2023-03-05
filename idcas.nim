@@ -30,7 +30,7 @@ proc beuint32_splice(n: int, s: openArray[byte], offset=0) =
 	copyMem(s[offset].unsafeAddr, n_beuint32.unsafeAddr, 4)
 
 
-### OpenSSL digest API wrapper
+### OpenSSL digest API wrappers
 
 type EVP_MD = distinct pointer
 proc EVP_blake2s256: EVP_MD {.importc, header: "<openssl/evp.h>".}
@@ -180,15 +180,13 @@ proc main(argv: seq[string]) =
 			main_help("Check options only work with a single file argument")
 
 
-	const
-		hm_magic_len = IDCAS_MAGIC.len
-		hm_hdr_len = hm_magic_len + 10
+	# Open hash-map / source / destination files
 	var
 		src: File
-		dst: FIle # nil if only one file is specified
+		dst: File # nil if only one file is specified
 		dst_fd: FileHandle
 		dst_sz: int64
-		hm: FIle
+		hm: File
 		hm_fd: FileHandle
 
 	hm_fd = open(opt_hm_file.cstring, O_CREAT or O_RDWR, 0o600)
@@ -208,20 +206,22 @@ proc main(argv: seq[string]) =
 		if not src.open(opt_dst):
 			quit &"ERROR: Failed to open dst-file: {opt_dst}"
 
-	defer:
-		if src == nil: src.close()
-		if dst == nil: dst.close()
+	defer: src.close(); dst.close()
 
 
 	# Check if header matches all options, or replace it and zap the file
-	block hm_header_skip:
+	const
+		hm_magic_len = IDCAS_MAGIC.len
+		hm_hdr_len = hm_magic_len + 10
+
+	block hm_hdr_skip:
 		hm.setFilePos(0)
 
 		var hdr_code = str_seq(IDCAS_MAGIC & "=lbs =sbs ")
 		beuint32_splice(opt_lbs, hdr_code, hm_magic_len)
 		beuint32_splice(opt_lbs, hdr_code, hm_magic_len + 5)
 
-		block hm_header_match:
+		block hm_hdr_match:
 			var hdr_file: array[hm_hdr_len, byte]
 			if hm.readBytes(hdr_file, 0, hm_hdr_len) == hm_hdr_len and
 				hdr_file == hdr_code: break
@@ -229,116 +229,120 @@ proc main(argv: seq[string]) =
 			if opt_check_full or opt_hm_update:
 				quit &"ERROR: hash-map-file header mismatch: {opt_hm_file}"
 
-			block hm_header_replace:
+			block hm_hdr_replace:
 				hm.setFilePos(0)
 				if hm.writeBytes(hdr_code, 0, hm_hdr_len) == hm_hdr_len and
 					hm_fd.ftruncate(hm_hdr_len) == 0: break
 				quit &"ERROR: Failed to replace hash-map-file header: {opt_hm_file}"
 
-	block copy_blocks:
-		var
-			buff_lbs = newSeq[byte](opt_lbs)
-			bs: int
-			lbs_pos: int64 = 0
-			sbs: int
-			sbs_len: int
-			eof = false
 
-			bh_len: cint
-			bh_res: cint
-			bh_md = EVP_blake2s256()
-			bh_md_len = 32
+	# Scan and update file blocks
+	var
+		buff_lbs = newSeq[byte](opt_lbs)
+		bs: int
+		lbs_pos: int64 = 0
+		sbs: int
+		sbs_len: int
+		eof = false
 
-			hm_blk_sbc = int(opt_lbs / opt_sbs)
-			hm_blk_len = bh_md_len + bh_md_len * hm_blk_sbc
-			hm_blk_new = newSeq[byte](hm_blk_len)
-			hm_blk = newSeq[byte](hm_blk_len)
-			hm_blk_pos: int64 = hm_hdr_len
-			hm_blk_zero = newSeq[byte](hm_blk_len)
+		bh_len: cint
+		bh_res: cint
+		bh_md = EVP_blake2s256()
+		bh_md_len = 32
 
-			st_lb_chk = 0
-			st_lb_upd = 0
-			st_sb_chk = 0
-			st_sb_upd = 0
+		hm_blk_sbc = int(opt_lbs / opt_sbs)
+		hm_blk_len = bh_md_len + bh_md_len * hm_blk_sbc
+		hm_blk_new = newSeq[byte](hm_blk_len)
+		hm_blk = newSeq[byte](hm_blk_len)
+		hm_blk_pos: int64 = hm_hdr_len
+		hm_blk_zero = newSeq[byte](hm_blk_len)
 
-		template hash_block(src: byte, src_len: cint, dst: byte, err_msg: string) =
-			bh_res = EVP_Digest(src.addr, src_len, dst.addr, bh_len.addr, bh_md, nil)
-			if bh_res != 1'i32 or bh_len != bh_md_len.cint: quit err_msg
+		st_lb_chk = 0
+		st_lb_upd = 0
+		st_sb_chk = 0
+		st_sb_upd = 0
 
-		template hash_cmp(s1, s2: byte): bool =
-			cmpMem(s1.addr, s2.addr, bh_md_len) == 0
+	template hash_block(src: byte, src_len: cint, dst: byte, err_msg: string) =
+		bh_res = EVP_Digest(src.addr, src_len, dst.addr, bh_len.addr, bh_md, nil)
+		if bh_res != 1'i32 or bh_len != bh_md_len.cint: quit err_msg
 
-		while not eof:
-			bs = src.readBytes(buff_lbs, 0, opt_lbs)
-			if bs < opt_lbs:
-				eof = src.endOfFile
-				if not eof: quit "ERROR: File read failed"
-				if bs == 0: continue
+	template hash_cmp(s1, s2: byte): bool =
+		cmpMem(s1.addr, s2.addr, bh_md_len) == 0
 
-			hash_block( buff_lbs[0], bs.cint, hm_blk_new[0],
-				&"ERROR: Hashing failed on LB#{st_lb_chk} [{bs.sz} at {src.getFilePos-bs}]" )
-			st_lb_chk += 1
+	while not eof:
+		bs = src.readBytes(buff_lbs, 0, opt_lbs)
+		if bs < opt_lbs:
+			eof = src.endOfFile
+			if not eof: quit "ERROR: File read failed"
+			if bs == 0: continue
 
-			block block_update:
-				sbs = hm.readBytes(hm_blk, 0, hm_blk_len)
-				if sbs == hm_blk_len and hash_cmp(hm_blk[0], hm_blk_new[0]): break
-				if opt_check: quit 1
-				if sbs < hm_blk_len: zeroMem(hm_blk[sbs].addr, hm_blk_len - sbs)
-				st_lb_upd += 1
+		hash_block( buff_lbs[0], bs.cint, hm_blk_new[0],
+			&"ERROR: Hashing failed on LB#{st_lb_chk} [{bs.sz} at {src.getFilePos-bs}]" )
+		st_lb_chk += 1
 
-				sbs_len = opt_sbs
-				for n in 0..<hm_blk_sbc:
-					sbs = bh_md_len * (n + 1)
-					if bs < 0: zeroMem(hm_blk_new[sbs].addr, hm_blk_len - sbs)
-					if bs <= 0: break
-					bs -= opt_sbs
-					if bs < 0: sbs_len += bs # short SB at EOF
+		block lb_update:
+			sbs = hm.readBytes(hm_blk, 0, hm_blk_len)
+			if sbs == hm_blk_len and hash_cmp(hm_blk[0], hm_blk_new[0]): break
+			if opt_check: quit 1
+			if sbs < hm_blk_len: zeroMem(hm_blk[sbs].addr, hm_blk_len - sbs)
+			st_lb_upd += 1
 
-					hash_block( buff_lbs[opt_sbs * n], sbs_len.cint, hm_blk_new[sbs],
-						&"ERROR: Hashing failed on SB#{n} in LB#{st_lb_chk}" )
-					while true: # hm_blk_zero is used to indicate missing SB - rehash if it pops-up
-						if not hash_cmp(hm_blk_new[sbs], hm_blk_zero[0]): break
-						hash_block( hm_blk_new[sbs], bh_md_len.cint, hm_blk_new[sbs],
-							&"ERROR: Re-hashing failed on SB#{n} in LB#{st_lb_chk}" )
-					st_sb_chk += 1
+			sbs_len = opt_sbs
+			for n in 0..<hm_blk_sbc:
+				sbs = bh_md_len * (n + 1)
+				if bs < 0: zeroMem(hm_blk_new[sbs].addr, hm_blk_len - sbs)
+				if bs <= 0: break
+				bs -= opt_sbs
+				if bs < 0: sbs_len += bs # short SB at EOF
 
-					if hash_cmp(hm_blk[sbs], hm_blk_new[sbs]): continue
-					st_sb_upd += 1
+				hash_block( buff_lbs[opt_sbs * n], sbs_len.cint, hm_blk_new[sbs],
+					&"ERROR: Hashing failed on SB#{n} in LB#{st_lb_chk}" )
+				while true: # hm_blk_zero is used to indicate missing SB - rehash if it pops-up
+					if not hash_cmp(hm_blk_new[sbs], hm_blk_zero[0]): break
+					hash_block( hm_blk_new[sbs], bh_md_len.cint, hm_blk_new[sbs],
+						&"ERROR: Re-hashing failed on SB#{n} in LB#{st_lb_chk}" )
+				st_sb_chk += 1
 
-					if dst != nil:
-						let sbs_pos = lbs_pos + opt_sbs * n
-						dst.setFilePos(sbs_pos)
-						if dst.writeBytes(buff_lbs, opt_sbs * n, sbs_len) != sbs_len:
-							quit &"ERROR: Failed to replace dst-file SB {st_lb_chk}.{n} [at {sbs_pos}]"
+				if hash_cmp(hm_blk[sbs], hm_blk_new[sbs]): continue
+				st_sb_upd += 1
 
-				if not opt_check_full:
-					hm.setFilePos(hm_blk_pos)
-					if hm.writeBytes(hm_blk_new, 0, hm_blk_len) != hm_blk_len:
-						quit &"ERROR: Failed to replace hash-map-file block [at {hm_blk_pos}]"
+				if dst != nil:
+					let sbs_pos = lbs_pos + opt_sbs * n
+					dst.setFilePos(sbs_pos)
+					if dst.writeBytes(buff_lbs, opt_sbs * n, sbs_len) != sbs_len:
+						quit &"ERROR: Failed to replace dst-file SB {st_lb_chk}.{n} [at {sbs_pos}]"
 
-			lbs_pos += opt_lbs
-			hm_blk_pos += hm_blk_len
+			if not opt_check_full:
+				hm.setFilePos(hm_blk_pos)
+				if hm.writeBytes(hm_blk_new, 0, hm_blk_len) != hm_blk_len:
+					quit &"ERROR: Failed to replace hash-map-file block [at {hm_blk_pos}]"
 
-		if opt_check: quit 0
-		if not opt_check_full:
-			if hm_fd.ftruncate(hm.getFilePos.int) != 0:
-				quit &"ERROR: Failed to truncate hash-map-file"
+		lbs_pos += opt_lbs
+		hm_blk_pos += hm_blk_len
 
-		var dst_sz_diff = ""
-		if dst != nil:
-			let
-				src_sz = src.getFilePos
-				dst_sz_bs = src_sz - dst_sz
-			if dst_fd.ftruncate(src_sz.int) != 0:
-				quit &"ERROR: Failed to truncate dst-file"
-			if dst_sz_bs != 0:
-				dst_sz_diff = if dst_sz_bs > 0: "+" else: "-"
-				dst_sz_diff = &" [{dst_sz_diff}{abs(dst_sz_bs).sz}]"
 
-		if opt_verbose:
-			echo( &"Stats: {src.getFilePos.sz} file{dst_sz_diff}" &
-				&" + {hm.getFilePos.sz} hash-map :: {st_lb_chk} LBs," &
-				&" {st_lb_upd} updated :: {st_sb_chk} SBs compared," &
-				&" {st_sb_upd} copied :: {(st_sb_upd * opt_sbs).sz} written" )
+	# Sync file sizes, return/print results
+
+	if opt_check: quit 0
+	if not opt_check_full:
+		if hm_fd.ftruncate(hm.getFilePos.int) != 0:
+			quit &"ERROR: Failed to truncate hash-map-file"
+
+	var dst_sz_diff = ""
+	if dst != nil:
+		let
+			src_sz = src.getFilePos
+			dst_sz_bs = src_sz - dst_sz
+		if dst_fd.ftruncate(src_sz.int) != 0:
+			quit &"ERROR: Failed to truncate dst-file"
+		if dst_sz_bs != 0:
+			dst_sz_diff = if dst_sz_bs > 0: "+" else: "-"
+			dst_sz_diff = &" [{dst_sz_diff}{abs(dst_sz_bs).sz}]"
+
+	if opt_verbose:
+		echo( &"Stats: {src.getFilePos.sz} file{dst_sz_diff}" &
+			&" + {hm.getFilePos.sz} hash-map :: {st_lb_chk} LBs," &
+			&" {st_lb_upd} updated :: {st_sb_chk} SBs compared," &
+			&" {st_sb_upd} copied :: {(st_sb_upd * opt_sbs).sz} data diffs" )
 
 when is_main_module: main(os.commandLineParams())
