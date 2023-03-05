@@ -148,7 +148,7 @@ proc main(argv: seq[string]) =
 			if k in ["m", "hash-map"]: opt_hm_file = v
 			elif k in ["B", "block-large"]: opt_lbs = parseInt(v)
 			elif k in ["b", "block-small"]: opt_sbs = parseInt(v)
-			else: quit(&"BUG: no type info for option [ {k} = {v} ]")
+			else: quit &"BUG: no type info for option [ {k} = {v} ]"
 
 		for t, opt, val in getopt(argv):
 			case t
@@ -193,20 +193,20 @@ proc main(argv: seq[string]) =
 
 	hm_fd = open(opt_hm_file.cstring, O_CREAT or O_RDWR, 0o600)
 	if hm_fd < 0 or not hm.open(hm_fd, fmReadWriteExisting):
-		quit(&"ERROR: Failed to open/create hash-map-file: {opt_hm_file}")
+		quit &"ERROR: Failed to open/create hash-map-file: {opt_hm_file}"
 	defer: hm.close()
 
 	if opt_src != "":
 		if not src.open(opt_src):
-			quit(&"ERROR: Failed to open src-file: {opt_src}")
+			quit &"ERROR: Failed to open src-file: {opt_src}"
 		dst_fd = open(opt_dst.cstring, O_CREAT or O_RDWR, 0o600)
 		if dst_fd < 0 or not dst.open(dst_fd, fmReadWriteExisting):
-			quit(&"ERROR: Failed to open dst-file: {opt_dst}")
+			quit &"ERROR: Failed to open dst-file: {opt_dst}"
 		dst_sz = dst.getFileSize
 
 	else:
 		if not src.open(opt_dst):
-			quit(&"ERROR: Failed to open dst-file: {opt_dst}")
+			quit &"ERROR: Failed to open dst-file: {opt_dst}"
 
 	defer:
 		if src == nil: src.close()
@@ -225,15 +225,15 @@ proc main(argv: seq[string]) =
 			var hdr_file: array[hm_hdr_len, byte]
 			if hm.readBytes(hdr_file, 0, hm_hdr_len) == hm_hdr_len and
 				hdr_file == hdr_code: break
-			if opt_check: quit(1)
+			if opt_check: quit 1
 			if opt_check_full or opt_hm_update:
-				quit(&"ERROR: hash-map-file header mismatch: {opt_hm_file}")
+				quit &"ERROR: hash-map-file header mismatch: {opt_hm_file}"
 
 			block hm_header_replace:
 				hm.setFilePos(0)
 				if hm.writeBytes(hdr_code, 0, hm_hdr_len) == hm_hdr_len and
 					hm_fd.ftruncate(hm_hdr_len) == 0: break
-				quit(&"ERROR: Failed to replace hash-map-file header: {opt_hm_file}")
+				quit &"ERROR: Failed to replace hash-map-file header: {opt_hm_file}"
 
 	block copy_blocks:
 		var
@@ -263,7 +263,7 @@ proc main(argv: seq[string]) =
 
 		template hash_block(src: byte, src_len: cint, dst: byte, err_msg: string) =
 			bh_res = EVP_Digest(src.addr, src_len, dst.addr, bh_len.addr, bh_md, nil)
-			if bh_res != 1'i32 or bh_len != bh_md_len.cint: quit(err_msg)
+			if bh_res != 1'i32 or bh_len != bh_md_len.cint: quit err_msg
 
 		template hash_cmp(s1, s2: byte): bool =
 			cmpMem(s1.addr, s2.addr, bh_md_len) == 0
@@ -272,7 +272,7 @@ proc main(argv: seq[string]) =
 			bs = src.readBytes(buff_lbs, 0, opt_lbs)
 			if bs < opt_lbs:
 				eof = src.endOfFile
-				if not eof: quit("ERROR: File read failed")
+				if not eof: quit "ERROR: File read failed"
 				if bs == 0: continue
 
 			hash_block( buff_lbs[0], bs.cint, hm_blk_new[0],
@@ -282,7 +282,7 @@ proc main(argv: seq[string]) =
 			block block_update:
 				sbs = hm.readBytes(hm_blk, 0, hm_blk_len)
 				if sbs == hm_blk_len and hash_cmp(hm_blk[0], hm_blk_new[0]): break
-				if opt_check: quit(1)
+				if opt_check: quit 1
 				if sbs < hm_blk_len: zeroMem(hm_blk[sbs].addr, hm_blk_len - sbs)
 				st_lb_upd += 1
 
@@ -309,20 +309,20 @@ proc main(argv: seq[string]) =
 						let sbs_pos = lbs_pos + opt_sbs * n
 						dst.setFilePos(sbs_pos)
 						if dst.writeBytes(buff_lbs, opt_sbs * n, sbs_len) != sbs_len:
-							quit(&"ERROR: Failed to replace dst-file SB {st_lb_chk}.{n} [at {sbs_pos}]")
+							quit &"ERROR: Failed to replace dst-file SB {st_lb_chk}.{n} [at {sbs_pos}]"
 
 				if not opt_check_full:
 					hm.setFilePos(hm_blk_pos)
 					if hm.writeBytes(hm_blk_new, 0, hm_blk_len) != hm_blk_len:
-						quit(&"ERROR: Failed to replace hash-map-file block [at {hm_blk_pos}]")
+						quit &"ERROR: Failed to replace hash-map-file block [at {hm_blk_pos}]"
 
 			lbs_pos += opt_lbs
 			hm_blk_pos += hm_blk_len
 
-		if opt_check: quit(0)
+		if opt_check: quit 0
 		if not opt_check_full:
 			if hm_fd.ftruncate(hm.getFilePos.int) != 0:
-				quit(&"ERROR: Failed to truncate hash-map-file")
+				quit &"ERROR: Failed to truncate hash-map-file"
 
 		var dst_sz_diff = ""
 		if dst != nil:
@@ -330,7 +330,7 @@ proc main(argv: seq[string]) =
 				src_sz = src.getFilePos
 				dst_sz_bs = src_sz - dst_sz
 			if dst_fd.ftruncate(src_sz.int) != 0:
-				quit(&"ERROR: Failed to truncate dst-file")
+				quit &"ERROR: Failed to truncate dst-file"
 			if dst_sz_bs != 0:
 				dst_sz_diff = if dst_sz_bs > 0: "+" else: "-"
 				dst_sz_diff = &" [{dst_sz_diff}{abs(dst_sz_bs).sz}]"
