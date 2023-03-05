@@ -1,7 +1,7 @@
 #? replace(sub = "\t", by = "  ")
 #
-# Debug build/run: nim c -w=on --hints=on -o=idcas -r idcas.nim -h
-# Final build: nim c -d:production -o=idcas idcas.nim && strip idcas
+# Debug build/run: nim c -w=on --hints=on -r idcas.nim -h
+# Final build: nim c -d:release idcas.nim && strip idcas
 # Usage info: ./idcas -h
 
 import strformat, strutils, parseopt, os, posix, re

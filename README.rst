@@ -1,8 +1,9 @@
 Incremetal Disk (or VM-image/big-file) Compare And Sync tool (idcas)
 ======================================================================
 
-Tool to build/maintain hash-map of source file/dev/img blocks, to later detect changed
-ones, and copy those to destination using as few read/write operations as possible.
+Tool to build/maintain hash-map of source file/blkdev/img blocks, to later
+detect changed ones, and copy those to destination using as few read/write
+operations as possible.
 
 It is useful when source is fast (e.g. local SSD), but destination is
 either slow (like network or USB-HDD), or has limited write endurance
@@ -18,11 +19,11 @@ Build and usage
 
 This tool is written in Nim_ C-adjacent language, linked against OpenSSL_ (libcrypto).
 
-Build it with: ``nim c -d:production -o=idcas idcas.nim && strip idcas``
+Build it with: ``nim c -d:release idcas.nim && strip idcas``
 
 Test and usage info: ``./idcas -h``
 
-Installation: copy to anywhere you can/intend-to run it from.
+Installation: copy resulting binary to anywhere you can/intend-to run it from.
 
 Usage example::
 
@@ -240,5 +241,7 @@ While using the tool from scripts, ``-M/--hash-map-update`` option can be added
 to treat missing or invalid hash-map-file as an error, as it should probably always
 be there for routine runs, and should never be rebuilt anew with a complete resync
 by such scripts.
+
+Hash-map file format is not tied to current host's type sizes or endianness.
 
 .. _BLAKE2s: https://en.wikipedia.org/wiki/BLAKE_(hash_function)
