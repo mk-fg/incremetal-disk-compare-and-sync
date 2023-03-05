@@ -13,6 +13,12 @@ other more specialized use-cases - see below.
 .. contents::
   :backlinks: none
 
+This repository URLs:
+
+- https://github.com/mk-fg/incremetal-disk-compare-and-sync
+- https://codeberg.org/mk-fg/incremetal-disk-compare-and-sync
+- https://fraggod.net/code/git/incremetal-disk-compare-and-sync
+
 
 Build and usage
 ---------------
