@@ -1,5 +1,5 @@
 Incremetal Disk (or VM-image/big-file) Compare And Sync tool (idcas)
-======================================================================
+====================================================================
 
 Tool to build/maintain hash-map of source file/blkdev/img blocks, to later
 detect changed ones, and copy those to destination using as few read/write
@@ -145,7 +145,7 @@ sure to look at those first.
   - After completion, run ``sync`` or such to flush pending writes to disk, and rename
     ``hash-map-file.new`` to persistent place after that, atomically replacing earlier file.
 
-  Any interruption during this will at worst redo some copying from the old hash-map.
+  Interruption/restart during this will at worst redo some copying from the old hash-map.
 
 - Anything to do with multiple files/directories on a filesystem - works between
   single explicitly-specified src/dst paths directly, and that's it.
@@ -215,20 +215,21 @@ Whole operation is broken into following steps:
   if source got smaller, or otherwise will naturally grow as well, as changes
   against "nothing" get appended there.
 
-In special modes like building hash-map-file or checking one file, process is
+In special modes, like building hash-map-file or validation-only, process is
 simplified to remove updating destination/hash-map steps that aren't relevant.
 
-Hash-map file has a header with LB/SB block sizes, and if those don't match exactly,
-hash-map-file is truncated and gets rebuilt from scratch, copying all data too.
+Hash-map file has a header with LB/SB block sizes, and if those don't match
+exactly, it is truncated/discarded as invalid and gets rebuilt from scratch,
+copying all data too.
 
-Default (as on 2023-03-05) LB/SB block sizes correspond to following rules:
+Default (as of 2023-03-05) LB/SB block sizes correspond to following ratios:
 
 - ~4 MiB large block (LB) creates/updates/corresponds-to exactly 4 KiB block of
   hashes (32B LB hash + 127 \* 32B SB hashes).
 
 - So 1 GiB file will have about 1 MiB of hash-map metadata, ~7 GiB hash-map for
-  a 7 TiB file, and so on - very easy to estimate with ~1024x diff in block sizes
-  like that.
+  a 7 TiB file, and so on - very easy to estimate with ~1024x diff (2^10) in
+  block sizes like that.
 
 These sizes can be set at compile-time, using ``-d`` define-options for
 nim-compile command, for example::
