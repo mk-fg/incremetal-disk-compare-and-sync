@@ -347,4 +347,6 @@ proc main(argv: seq[string]) =
 			&" {st_lb_upd} updated :: {st_sb_chk} SBs compared," &
 			&" {st_sb_upd} copied :: {(st_sb_upd * opt_sbs).sz} data diffs" )
 
+	if opt_check_full and st_lb_upd > 0: quit 1
+
 when is_main_module: main(os.commandLineParams())
