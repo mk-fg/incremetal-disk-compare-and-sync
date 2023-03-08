@@ -9,28 +9,15 @@ import strformat, strutils, parseopt, os, posix, re
 
 {.passl: "-lcrypto"}
 
-const IDCAS_MAGIC {.strdefine.} = "idcas-hash-map-1 "
+const IDCAS_MAGIC {.strdefine.} = "idcas-hash-map-1"
 const IDCAS_HM_EXT {.strdefine.} = ".idcas" # default hashmap-file suffix
 const IDCAS_LBS {.intdefine.} = 4161536 # <4M - large blocks to check for initial mismatches
 const IDCAS_SBS {.intdefine.} = 32768 # 32K - blocks to compare/copy on LBS mismatch
 # hash-map-file block = 32B lb-hash + 32B * (lbs / sbs) = neat 4K (w/ sbs=32K lbs=127*32K)
 
+when IDCAS_LBS <= IDCAS_SBS or IDCAS_LBS %% IDCAS_SBS != 0:
+	{.emit: "#error Compiled-in LB/SB size values mismatch - LBS must be larger and divisible by SBS".}
 
-### File readBytes/writeBytes helpers
-
-proc str_seq(src: string, length=0, offset=0): seq[byte] =
-	let len_max = src.len - offset
-	result = newSeq[byte](if length > 0 and length <= len_max: length else: len_max)
-	copyMem(result[0].addr, src[offset].unsafeAddr, result.len)
-
-proc beuint32_splice(n: int, s: openArray[byte], offset=0) =
-	if s.len - offset < 4:
-		raise newException(ValueError, &"Out-of-bounds splice ({offset}/{s.len-4})")
-	var n_beuint32 = n.uint32.htonl
-	copyMem(s[offset].unsafeAddr, n_beuint32.unsafeAddr, 4)
-
-
-### OpenSSL digest API wrappers
 
 type EVP_MD = distinct pointer
 proc EVP_blake2s256: EVP_MD {.importc, header: "<openssl/evp.h>".}
@@ -38,8 +25,6 @@ proc EVP_Digest(
 	data: pointer, data_len: cint, digest: pointer, digest_len: ptr cint,
 	md: EVP_MD, engine: pointer ): cint {.importc, header: "<openssl/evp.h>".}
 
-
-### Main stuff
 
 proc sz(v: int|int64): string =
 	formatSize(v, includeSpace=true).replacef(re"(\.\d)\d+", "$1")
@@ -176,7 +161,7 @@ proc main(argv: seq[string]) =
 			opt_dst = opt_src; opt_src = ""
 		if opt_hm_file == "":
 			opt_hm_file = &"{opt_dst}{IDCAS_HM_EXT}"
-		if opt_lbs %% opt_sbs != 0:
+		if opt_lbs <= opt_sbs or opt_lbs %% opt_sbs != 0:
 			main_help("Large/small block sizes mismatch - must be divisible")
 		if (opt_check or opt_check_full) and opt_src != "":
 			main_help("Check options only work with a single file argument")
@@ -212,30 +197,33 @@ proc main(argv: seq[string]) =
 
 
 	# Check if header matches all options, or replace it and zap the file
-	const
-		hm_magic_len = IDCAS_MAGIC.len
-		hm_hdr_len = hm_magic_len + 10
+	block hm_hdr_check:
+		var
+			hdr_magic = IDCAS_MAGIC
+			hdr_len = hdr_magic.len + 11
+			hdr_str = repeat(' ', hdr_len)
+			hdr_bs: uint32
+		copyMem(hdr_str[0].addr, hdr_magic[0].addr, hdr_magic.len)
+		hdr_bs = opt_lbs.uint32.htonl
+		copyMem(hdr_str[hdr_magic.len + 1].addr, hdr_bs.addr, 4)
+		hdr_bs = opt_sbs.uint32.htonl
+		copyMem(hdr_str[hdr_magic.len + 6].addr, hdr_bs.addr, 4)
+		let hdr_code = cast[seq[byte]](hdr_str)
 
-	block hm_hdr_skip:
+		var hdr_file = newSeq[byte](hdr_len)
 		hm.setFilePos(0)
+		if hm.readBytes(hdr_file, 0, hdr_len) == hdr_len and
+			hdr_file == hdr_code: break
 
-		var hdr_code = str_seq(IDCAS_MAGIC & "=lbs =sbs ")
-		beuint32_splice(opt_lbs, hdr_code, hm_magic_len)
-		beuint32_splice(opt_lbs, hdr_code, hm_magic_len + 5)
+		if opt_check: quit 1
+		if opt_check_full or opt_hm_update:
+			err_quit &"hash-map-file header mismatch: {opt_hm_file}"
 
-		block hm_hdr_match:
-			var hdr_file: array[hm_hdr_len, byte]
-			if hm.readBytes(hdr_file, 0, hm_hdr_len) == hm_hdr_len and
-				hdr_file == hdr_code: break
-			if opt_check: quit 1
-			if opt_check_full or opt_hm_update:
-				err_quit &"hash-map-file header mismatch: {opt_hm_file}"
-
-			block hm_hdr_replace:
-				hm.setFilePos(0)
-				if hm.writeBytes(hdr_code, 0, hm_hdr_len) == hm_hdr_len and
-					hm_fd.ftruncate(hm_hdr_len) == 0: break
-				err_quit &"Failed to replace hash-map-file header: {opt_hm_file}"
+		hm.setFilePos(0)
+		if hm.writeBytes(hdr_code, 0, hdr_len) != hdr_len or
+				hm_fd.ftruncate(hdr_len) != 0:
+			err_quit &"Failed to replace hash-map-file header: {opt_hm_file}"
+	hm.setFilePos(4096) # for best alignment, if hm_blk_len is also n*4096
 
 
 	# Scan and update file blocks
@@ -254,9 +242,9 @@ proc main(argv: seq[string]) =
 
 		hm_blk_sbc = int(opt_lbs / opt_sbs)
 		hm_blk_len = bh_md_len + bh_md_len * hm_blk_sbc
-		hm_blk_new = newSeq[byte](hm_blk_len)
+		hm_blk_pos: int64 = hm.getFilePos
 		hm_blk = newSeq[byte](hm_blk_len)
-		hm_blk_pos: int64 = hm_hdr_len
+		hm_blk_new = newSeq[byte](hm_blk_len)
 		hm_blk_zero = newSeq[byte](hm_blk_len)
 
 		st_lb_chk = 0
