@@ -122,6 +122,11 @@ Intended use-cases include:
   blocks to a non-sparse destination (i.e. "apply patch/delta" that way),
   or convert those to/from non-sparse files as-needed.
 
+- Resumable/repeatable dumb-copy between two devices, to use instead of dd/ddrescue_.
+
+  Sometimes you just have to tweak minor stuff on source dev, or have some old
+  copy otherwise, and doing full clone over that is a waste of time and SSD cycles.
+
 For most other uses, aforementioned rdiff_ and rsync_ tools might be good enough
 (see rsync's --partial, --inplace and --append-verify opts in particular) - make
 sure to look at those first.
@@ -178,15 +183,27 @@ sure to look at those first.
 
 - Any kind of permissions and file metadata - only file contents are synchronized.
 
+It is also **not** a good replacement for btrfs_/zfs_ send/recv replication
+functionality, and should work much worse with these and other copy-on-write
+filesystems, because they basically log all changes made to them, not overwrite
+same blocks in-place, producing massive diffs in underlying storage even when
+final delta ends up being tiny or non-existant.
+
+Which is why they have much more efficient fs-level incremental replication
+built into them - it should be a much better option than a "dumb" block-level
+replication for those.
+
 .. _rsync: https://rsync.samba.org/
 .. _rdiff: https://librsync.github.io/page_rdiff.html
-.. _btrfs: https://btrfs.wiki.kernel.org/index.php/Main_Page
+.. _btrfs: https://btrfs.readthedocs.io/en/latest/
 .. _bmaptool: https://github.com/intel/bmap-tools
+.. _ddrescue: https://www.gnu.org/software/ddrescue/ddrescue.html
 .. _bmap-tools: https://manpages.debian.org/testing/bmap-tools/bmaptool.1.en.html
 .. _casync: https://github.com/systemd/casync
 .. _xdelta3: http://xdelta.org/
 .. _zsync: http://zsync.moria.org.uk/
 .. _bittorrent: https://en.wikipedia.org/wiki/BitTorrent
+.. _zfs: https://zfsonlinux.org/
 
 
 More technical and usage info
