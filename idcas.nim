@@ -228,24 +228,25 @@ proc main(argv: seq[string]) =
 
 	# Scan and update file blocks
 	var
-		buff_lbs = newSeq[byte](opt_lbs)
-		bs: int
-		lbs_pos: int64 = 0
+		lbs: int
 		sbs: int
-		sbs_len: int
 		eof = false
+		lb_buff = newSeq[byte](opt_lbs)
+		lb_pos: int64 = 0
+		dst_pos: int64 = -1
 
 		bh_len: cint
 		bh_res: cint
 		bh_md = EVP_blake2s256()
 		bh_md_len = 32
 
-		hm_blk_sbc = int(opt_lbs / opt_sbs)
-		hm_blk_len = bh_md_len + bh_md_len * hm_blk_sbc
-		hm_blk_pos: int64 = hm.getFilePos
-		hm_blk = newSeq[byte](hm_blk_len)
-		hm_blk_new = newSeq[byte](hm_blk_len)
-		hm_blk_zero = newSeq[byte](hm_blk_len)
+		hm_bs: int
+		hm_sbc = int(opt_lbs / opt_sbs)
+		hm_len = bh_md_len + bh_md_len * hm_sbc
+		hm_pos: int64 = hm.getFilePos
+		hm_blk = newSeq[byte](hm_len)
+		hm_blk_new = newSeq[byte](hm_len)
+		hm_blk_zero = newSeq[byte](hm_len)
 
 		st_lb_chk = 0
 		st_lb_upd = 0
@@ -260,55 +261,56 @@ proc main(argv: seq[string]) =
 		cmpMem(s1.addr, s2.addr, bh_md_len) == 0
 
 	while not eof:
-		bs = src.readBytes(buff_lbs, 0, opt_lbs)
-		if bs < opt_lbs:
+		lbs = src.readBytes(lb_buff, 0, opt_lbs)
+		if lbs < opt_lbs:
 			eof = src.endOfFile
 			if not eof: err_quit "File read failed"
-			if bs == 0: continue
+			if lbs == 0: continue
 
-		hash_block( buff_lbs[0], bs.cint, hm_blk_new[0],
-			&"Hashing failed on LB#{st_lb_chk} [{bs.sz} at {src.getFilePos-bs}]" )
+		hash_block( lb_buff[0], lbs.cint, hm_blk_new[0],
+			&"Hashing failed on LB#{st_lb_chk} [{lbs.sz} at {src.getFilePos-lbs}]" )
 		st_lb_chk += 1
 
 		block lb_check_update:
-			sbs = hm.readBytes(hm_blk, 0, hm_blk_len)
-			if sbs == hm_blk_len and hash_cmp(hm_blk[0], hm_blk_new[0]): break
+			hm_bs = hm.readBytes(hm_blk, 0, hm_len)
+			if hm_bs == hm_len and hash_cmp(hm_blk[0], hm_blk_new[0]): break
 			if opt_check: quit 1
-			if sbs < hm_blk_len: zeroMem(hm_blk[sbs].addr, hm_blk_len - sbs)
+			if hm_bs < hm_len: zeroMem(hm_blk[hm_bs].addr, hm_len - hm_bs)
 			st_lb_upd += 1
 
-			sbs_len = opt_sbs
-			for n in 0..<hm_blk_sbc:
-				sbs = bh_md_len * (n + 1)
-				if bs < 0: zeroMem(hm_blk_new[sbs].addr, hm_blk_len - sbs)
-				if bs <= 0: break
-				bs -= opt_sbs
-				if bs < 0: sbs_len += bs # short SB at EOF
+			sbs = opt_sbs
+			for n in 0..<hm_sbc:
+				hm_bs = bh_md_len * (n + 1)
+				if lbs < 0: zeroMem(hm_blk_new[hm_bs].addr, hm_len - hm_bs)
+				if lbs <= 0: break
+				lbs -= opt_sbs
+				if lbs < 0: sbs += lbs # short SB at EOF
 
-				hash_block( buff_lbs[opt_sbs * n], sbs_len.cint, hm_blk_new[sbs],
+				hash_block( lb_buff[opt_sbs * n], sbs.cint, hm_blk_new[hm_bs],
 					&"Hashing failed on SB#{n} in LB#{st_lb_chk}" )
 				while true: # hm_blk_zero is used to indicate missing SB - rehash if it pops-up
-					if not hash_cmp(hm_blk_new[sbs], hm_blk_zero[0]): break
-					hash_block( hm_blk_new[sbs], bh_md_len.cint, hm_blk_new[sbs],
+					if not hash_cmp(hm_blk_new[hm_bs], hm_blk_zero[0]): break
+					hash_block( hm_blk_new[hm_bs], bh_md_len.cint, hm_blk_new[hm_bs],
 						&"Re-hashing failed on SB#{n} in LB#{st_lb_chk}" )
 				st_sb_chk += 1
 
-				if hash_cmp(hm_blk[sbs], hm_blk_new[sbs]): continue
+				if hash_cmp(hm_blk[hm_bs], hm_blk_new[hm_bs]): continue
 				st_sb_upd += 1
 
 				if dst != nil:
-					let sbs_pos = lbs_pos + opt_sbs * n
-					dst.setFilePos(sbs_pos)
-					if dst.writeBytes(buff_lbs, opt_sbs * n, sbs_len) != sbs_len:
-						err_quit &"Failed to replace dst-file SB {st_lb_chk}.{n} [at {sbs_pos}]"
+					let sb_pos = lb_pos + opt_sbs * n
+					if sb_pos != dst_pos: dst.setFilePos(sb_pos)
+					if dst.writeBytes(lb_buff, opt_sbs * n, sbs) != sbs:
+						err_quit &"Failed to replace dst-file SB {st_lb_chk}.{n} [at {sb_pos}]"
+					dst_pos = sb_pos + sbs
 
 			if not opt_check_full:
-				hm.setFilePos(hm_blk_pos)
-				if hm.writeBytes(hm_blk_new, 0, hm_blk_len) != hm_blk_len:
-					err_quit &"Failed to replace hash-map-file block [at {hm_blk_pos}]"
+				hm.setFilePos(hm_pos)
+				if hm.writeBytes(hm_blk_new, 0, hm_len) != hm_len:
+					err_quit &"Failed to replace hash-map-file block [at {hm_pos}]"
 
-		lbs_pos += opt_lbs
-		hm_blk_pos += hm_blk_len
+		lb_pos += opt_lbs
+		hm_pos += hm_len
 
 
 	# Sync file sizes, return/print results
