@@ -36,8 +36,8 @@ proc main_help(err="") =
 		let dst = if err == "": stdout else: stderr
 		write(dst, s); write(dst, "\n")
 	let app = getAppFilename().lastPathPart
-	if err != "": print &"ERROR: {err}\n"
-	print &"Usage: {app} [options] [src-file] dst-file"
+	if err != "": print &"ERROR: {err}"
+	print &"\nUsage: {app} [options] [src-file] dst-file"
 	if err != "":
 		print &"Run '{app} --help' for more information"
 		quit 0
@@ -60,23 +60,23 @@ proc main_help(err="") =
 				% {app} -v vm.img /mnt/usb-hdd/vm.img.bak
 			## ...and so on - block devices or sparse files can also be used here
 
-		Hash-map file example is generated/updated as /mnt/usb-hdd/vm.img.bak{IDCAS_HM_EXT}
-		Hash function used in hash-map-file is always 32B BLAKE2s from openssl.
+		Hash-map file in this example is generated/updated as /mnt/usb-hdd/vm.img.bak{IDCAS_HM_EXT}
+		Hash function used in hash-map-file is always 32B BLAKE2s from OpenSSL.
 
-		Input/output options:
+		Arguments and options (in "{app} [options] [src-file] dst-file"):
 
-			src-file
+			<src-file>
 				Source file to read and copy/update both hash-map-file and dst-file from.
 				Always read from start to finish in a single pass, so can also be a fifo pipe.
 				If not specified, hash-map-file for dst-file is created/updated, nothing copied.
 
-			dst-file
+			<dst-file>
 				Destination file to update in-place from src-file according to hash-map-file
 					(if it exists), or otherwise do a full copy from src-file to it (if specified).
 				If only one file argument is passed, it is assumed to be a dst-file
 					to create/update hash-map-file for, instead of copying file contents in any way.
 
-			-m/--hash-map hash-map-file
+			-m/--hash-map <hash-map-file>
 				Hash-map file to read/create/update in-place, as needed.
 				If not specified, default is to use file next to dst-file with {IDCAS_HM_EXT} suffix.
 				Created if missing (without -M/--hash-map-update), updated in-place otherwise.
