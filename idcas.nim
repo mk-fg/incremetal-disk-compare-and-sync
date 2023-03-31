@@ -25,6 +25,16 @@ proc EVP_Digest(
 	data: pointer, data_len: cint, digest: pointer, digest_len: ptr cint,
 	md: EVP_MD, engine: pointer ): cint {.importc, header: "<openssl/evp.h>".}
 
+type EVP_MD_CTX = distinct pointer
+proc EVP_MD_CTX_new(): EVP_MD_CTX {.importc, header: "<openssl/evp.h>".}
+proc EVP_MD_CTX_free(md_ctx: EVP_MD_CTX) {.importc, header: "<openssl/evp.h>".}
+proc EVP_DigestInit(
+	md_ctx: EVP_MD_CTX, md: EVP_MD ): cint {.importc, header: "<openssl/evp.h>".}
+proc EVP_DigestUpdate( md_ctx: EVP_MD_CTX,
+	data: pointer, data_len: cint ): cint {.importc, header: "<openssl/evp.h>".}
+proc EVP_DigestFinal( md_ctx: EVP_MD_CTX,
+	digest: pointer, digest_len: ptr cint ): cint {.importc, header: "<openssl/evp.h>".}
+
 
 proc sz(v: int|int64): string =
 	formatSize(v, includeSpace=true).replacef(re"(\.\d)\d+", "$1")
@@ -106,6 +116,11 @@ proc main_help(err="") =
 				Similar to -c/--check, but checks all hash-map blocks in the file,
 					and prints stats about amount of mismatches if -v/--verbose option is also used.
 
+			-H/--hash-map-hash
+				Print hex-encoded BLAKE2s hash line (no salt/person strings) of resulting
+					hash-map file to stdout, matching "openssl dgst -blake2s256" output for it.
+				More efficient than doing it separately, as tool always reads hash-map file anyway.
+
 			-v/--verbose
 				Print transfer statistics to stdout before exiting.
 		""")
@@ -122,20 +137,20 @@ proc main(argv: seq[string]) =
 		opt_verbose = false
 		opt_check = false
 		opt_check_full = false
+		opt_hm_hash = false
 
 	block cli_parser:
 		var opt_last = ""
-
+		proc opt_fmt(opt: string): string =
+			return if opt.len == 1: &"-{opt}" else: &"--{opt}"
 		proc opt_empty_check =
 			if opt_last == "": return
-			let opt = if opt_last.len == 1: &"-{opt_last}" else: &"--{opt_last}"
-			main_help(&"{opt} requires a value")
-
+			main_help &"{opt_fmt(opt_last)} option unrecognized or requires a value"
 		proc opt_set(k: string, v: string) =
 			if k in ["m", "hash-map"]: opt_hm_file = v
 			elif k in ["B", "block-large"]: opt_lbs = parseInt(v)
 			elif k in ["b", "block-small"]: opt_sbs = parseInt(v)
-			else: quit &"BUG: no type info for option [ {k} = {v} ]"
+			else: main_help &"Unrecognized option [ {opt_fmt(k)} = {v} ]"
 
 		for t, opt, val in getopt(argv):
 			case t
@@ -146,6 +161,7 @@ proc main(argv: seq[string]) =
 				elif opt in ["v", "verbose"]: opt_verbose = true
 				elif opt in ["c", "check"]: opt_check = true
 				elif opt in ["C", "check-full"]: opt_check_full = true
+				elif opt in ["H", "hash-map-hash"]: opt_hm_hash = true
 				elif val == "": opt_empty_check(); opt_last = opt
 				else: opt_set(opt, val)
 			of cmdArgument:
@@ -168,6 +184,7 @@ proc main(argv: seq[string]) =
 
 
 	# Open hash-map / source / destination files
+
 	var
 		src: File
 		dst: File # nil if only one file is specified
@@ -196,37 +213,8 @@ proc main(argv: seq[string]) =
 	defer: src.close; dst.close
 
 
-	# Check if header matches all options, or replace it and zap the file
-	block hm_hdr_check:
-		var
-			hdr_magic = IDCAS_MAGIC
-			hdr_len = hdr_magic.len + 11
-			hdr_str = repeat(' ', hdr_len)
-			hdr_bs: uint32
-		copyMem(hdr_str[0].addr, hdr_magic[0].addr, hdr_magic.len)
-		hdr_bs = opt_lbs.uint32.htonl
-		copyMem(hdr_str[hdr_magic.len + 1].addr, hdr_bs.addr, 4)
-		hdr_bs = opt_sbs.uint32.htonl
-		copyMem(hdr_str[hdr_magic.len + 6].addr, hdr_bs.addr, 4)
-		let hdr_code = cast[seq[byte]](hdr_str)
+	# State vars get reused for all blocks
 
-		var hdr_file = newSeq[byte](hdr_len)
-		hm.setFilePos(0)
-		if hm.readBytes(hdr_file, 0, hdr_len) == hdr_len and
-			hdr_file == hdr_code: break
-
-		if opt_check: quit 1
-		if opt_check_full or opt_hm_update:
-			err_quit &"hash-map-file header mismatch: {opt_hm_file}"
-
-		hm.setFilePos(0)
-		if hm.writeBytes(hdr_code, 0, hdr_len) != hdr_len or
-				hm_fd.ftruncate(hdr_len) != 0:
-			err_quit &"Failed to replace hash-map-file header: {opt_hm_file}"
-	hm.setFilePos(4096) # for best alignment, if hm_blk_len is also n*4096
-
-
-	# Scan and update file blocks
 	var
 		lbs: int
 		sbs: int
@@ -243,20 +231,76 @@ proc main(argv: seq[string]) =
 		hm_bs: int
 		hm_sbc = int(opt_lbs / opt_sbs)
 		hm_len = bh_md_len + bh_md_len * hm_sbc
-		hm_pos: int64 = hm.getFilePos
+		hm_pos: int64 = clamp(hm_len, 64, 4096)
 		hm_blk = newSeq[byte](hm_len)
 		hm_blk_new = newSeq[byte](hm_len)
 		hm_blk_zero = newSeq[byte](hm_len)
+		hm_hash_ctx: EVP_MD_CTX
+
+		hdr_magic = IDCAS_MAGIC
+		hdr_len = hdr_magic.len + 11
+		hdr_pad = newSeq[byte](hm_pos - hdr_len) # block alignment, if works with hm_len/fs
 
 		st_lb_chk = 0
 		st_lb_upd = 0
 		st_sb_chk = 0
 		st_sb_upd = 0
 
+	template hm_hash_init =
+		hm_hash_ctx = EVP_MD_CTX_new()
+		bh_res = EVP_DigestInit(hm_hash_ctx, bh_md)
+		if bh_res != 1'i32: err_quit "hash-map-hash init failed"
+	template hm_hash_update(buff: seq[byte]) =
+		if not opt_hm_hash: return
+		bh_res = EVP_DigestUpdate(hm_hash_ctx, buff[0].addr, buff.len.cint)
+		if bh_res != 1'i32: err_quit "hash-map-hash update failed"
+	proc hm_hash_finalize: string =
+		result = newString(bh_md_len)
+		bh_res = EVP_DigestFinal(hm_hash_ctx, result[0].addr, bh_len.addr)
+		if bh_res != 1'i32 or bh_len != bh_md_len.cint:
+			err_quit "hash-map-hash finalize failed"
+		EVP_MD_CTX_free(hm_hash_ctx)
+	if opt_hm_hash: hm_hash_init()
+
+
+	# Check if header matches all options, or replace it and zap the file
+
+	block hm_hdr_check:
+		var
+			hdr_str = repeat(' ', hdr_len)
+			hdr_bs: uint32
+		copyMem(hdr_str[0].addr, hdr_magic[0].addr, hdr_magic.len)
+		hdr_bs = opt_lbs.uint32.htonl
+		copyMem(hdr_str[hdr_magic.len + 1].addr, hdr_bs.addr, 4)
+		hdr_bs = opt_sbs.uint32.htonl
+		copyMem(hdr_str[hdr_magic.len + 6].addr, hdr_bs.addr, 4)
+		var hdr_code = cast[seq[byte]](hdr_str)
+		hm_hash_update(hdr_code)
+
+		var hdr_file = newSeq[byte](hdr_len)
+		hm.setFilePos(0)
+		if hm.readBytes(hdr_file, 0, hdr_len) == hdr_len and
+			hdr_file == hdr_code: break
+
+		if opt_check: quit 1
+		if opt_check_full or opt_hm_update:
+			err_quit &"hash-map-file header mismatch: {opt_hm_file}"
+
+		hm.setFilePos(0)
+		if hm.writeBytes(hdr_code, 0, hdr_len) != hdr_len or
+				hm_fd.ftruncate(hdr_len) != 0:
+			err_quit &"Failed to replace hash-map-file header: {opt_hm_file}"
+
+	if hm.readBytes(hdr_pad, 0, hdr_pad.len) != hdr_pad.len:
+		hm.setFilePos(hm_pos)
+	hm_hash_update(hdr_pad)
+
+
+	# Scan and update file blocks
+
 	template hash_block(src: byte, src_len: cint, dst: byte, err_msg: string) =
 		bh_res = EVP_Digest(src.addr, src_len, dst.addr, bh_len.addr, bh_md, nil)
 		if bh_res != 1'i32 or bh_len != bh_md_len.cint: err_quit err_msg
-
 	template hash_cmp(s1, s2: byte): bool =
 		cmpMem(s1.addr, s2.addr, bh_md_len) == 0
 
@@ -273,7 +317,9 @@ proc main(argv: seq[string]) =
 
 		block lb_check_update:
 			hm_bs = hm.readBytes(hm_blk, 0, hm_len)
-			if hm_bs == hm_len and hash_cmp(hm_blk[0], hm_blk_new[0]): break
+			if hm_bs == hm_len and hash_cmp(hm_blk[0], hm_blk_new[0]):
+				hm_hash_update(hm_blk)
+				break
 			if opt_check: quit 1
 			if hm_bs < hm_len: zeroMem(hm_blk[hm_bs].addr, hm_len - hm_bs)
 			st_lb_upd += 1
@@ -308,6 +354,7 @@ proc main(argv: seq[string]) =
 				hm.setFilePos(hm_pos)
 				if hm.writeBytes(hm_blk_new, 0, hm_len) != hm_len:
 					err_quit &"Failed to replace hash-map-file block [at {hm_pos}]"
+				hm_hash_update(hm_blk_new)
 
 		lb_pos += opt_lbs
 		hm_pos += hm_len
@@ -331,6 +378,7 @@ proc main(argv: seq[string]) =
 			dst_sz_diff = if dst_sz_bs > 0: "+" else: "-"
 			dst_sz_diff = &" [{dst_sz_diff}{abs(dst_sz_bs).sz}]"
 
+	if opt_hm_hash: echo hm_hash_finalize().toHex.toLowerAscii
 	if opt_verbose:
 		echo( &"Stats: {src.getFilePos.sz} file{dst_sz_diff}" &
 			&" + {hm.getFilePos.sz} hash-map :: {st_lb_chk} LBs," &
