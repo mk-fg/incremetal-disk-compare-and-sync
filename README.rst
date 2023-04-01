@@ -235,6 +235,9 @@ Whole operation is broken into following steps:
 In special modes, like building hash-map-file or validation-only, process is
 simplified to remove updating destination/hash-map steps that aren't relevant.
 
+``--print-file-hash`` and ``--print-hm-hash`` options, if specified, calculate
+their hashes from file reads/writes as they happen during this process anyway.
+
 Hash-map file has a header with LB/SB block sizes, and if those don't match
 exactly, it is truncated/discarded as invalid and gets rebuilt from scratch,
 copying all data too.

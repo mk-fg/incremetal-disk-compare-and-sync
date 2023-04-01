@@ -25,8 +25,9 @@ proc EVP_Digest(
 	data: pointer, data_len: cint, digest: pointer, digest_len: ptr cint,
 	md: EVP_MD, engine: pointer ): cint {.importc, header: "<openssl/evp.h>".}
 
+proc EVP_blake2b512: EVP_MD {.importc, header: "<openssl/evp.h>".}
 type EVP_MD_CTX = distinct pointer
-proc EVP_MD_CTX_new(): EVP_MD_CTX {.importc, header: "<openssl/evp.h>".}
+proc EVP_MD_CTX_new: EVP_MD_CTX {.importc, header: "<openssl/evp.h>".}
 proc EVP_MD_CTX_free(md_ctx: EVP_MD_CTX) {.importc, header: "<openssl/evp.h>".}
 proc EVP_DigestInit(
 	md_ctx: EVP_MD_CTX, md: EVP_MD ): cint {.importc, header: "<openssl/evp.h>".}
@@ -117,12 +118,12 @@ proc main_help(err="") =
 					and prints stats/hashes if -v/--verbose or --print-*-hash options are also used.
 
 			--print-hm-hash
-				Print hex-encoded BLAKE2s hash line (no key/salt/person) of resulting
-					hash-map file to stdout, matching "openssl dgst -blake2s256" output for it.
+				Print hex-encoded BLAKE2b 512-bit hash line (no key/salt/person) of resulting
+					hash-map file to stdout, matching "b2sum" or "openssl dgst" command outputs for it.
 				More efficient than doing it separately, as tool always reads hash-map file anyway.
 
 			--print-file-hash
-				Same as --print-hm-hash, but prints BLAKE2s hash for processed file(s).
+				Same as --print-hm-hash, but prints BLAKE2b hash for processed file(s).
 				Will be calculated from src-file reads, if specified, or dst-file reads otherwise.
 				If both --print-*-hash options are specified, this will be second hash line on stdout.
 
@@ -247,6 +248,8 @@ proc main(argv: seq[string]) =
 		hdr_len = hdr_magic.len + 11
 		hdr_pad = newSeq[byte](hm_pos - hdr_len) # block alignment, if works with hm_len/fs
 
+		hash_md = EVP_blake2b512()
+		hash_md_len = 64
 		hash_hm: EVP_MD_CTX
 		hash_file: EVP_MD_CTX
 
@@ -257,16 +260,16 @@ proc main(argv: seq[string]) =
 
 	template hash_init(ctx: EVP_MD_CTX) =
 		ctx = EVP_MD_CTX_new()
-		bh_res = EVP_DigestInit(ctx, bh_md)
+		bh_res = EVP_DigestInit(ctx, hash_md)
 		if bh_res != 1'i32: err_quit "hash init failed"
 	template hash_update(ctx: EVP_MD_CTX, buff: seq[byte], bs=0) =
 		bh_res = EVP_DigestUpdate(
 			ctx, buff[0].addr, cint(if bs != 0: bs else: buff.len) )
 		if bh_res != 1'i32: err_quit "hash update failed"
 	proc hash_finalize(ctx: EVP_MD_CTX): string =
-		result = newString(bh_md_len)
+		result = newString(hash_md_len)
 		bh_res = EVP_DigestFinal(ctx, result[0].addr, bh_len.addr)
-		if bh_res != 1'i32 or bh_len != bh_md_len.cint:
+		if bh_res != 1'i32 or bh_len != hash_md_len.cint:
 			err_quit "hash finalize failed"
 		EVP_MD_CTX_free(ctx)
 	if opt_hm_hash: hash_init(hash_hm)
