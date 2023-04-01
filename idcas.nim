@@ -114,12 +114,17 @@ proc main_help(err="") =
 
 			-C/--check-full
 				Similar to -c/--check, but checks all hash-map blocks in the file,
-					and prints stats about amount of mismatches if -v/--verbose option is also used.
+					and prints stats/hashes if -v/--verbose or --print-*-hash options are also used.
 
-			-H/--hash-map-hash
-				Print hex-encoded BLAKE2s hash line (no salt/person strings) of resulting
+			--print-hm-hash
+				Print hex-encoded BLAKE2s hash line (no key/salt/person) of resulting
 					hash-map file to stdout, matching "openssl dgst -blake2s256" output for it.
 				More efficient than doing it separately, as tool always reads hash-map file anyway.
+
+			--print-file-hash
+				Same as --print-hm-hash, but prints BLAKE2s hash for processed file(s).
+				Will be calculated from src-file reads, if specified, or dst-file reads otherwise.
+				If both --print-*-hash options are specified, this will be second hash line on stdout.
 
 			-v/--verbose
 				Print transfer statistics to stdout before exiting.
@@ -138,6 +143,7 @@ proc main(argv: seq[string]) =
 		opt_check = false
 		opt_check_full = false
 		opt_hm_hash = false
+		opt_file_hash = false
 
 	block cli_parser:
 		var opt_last = ""
@@ -161,7 +167,8 @@ proc main(argv: seq[string]) =
 				elif opt in ["v", "verbose"]: opt_verbose = true
 				elif opt in ["c", "check"]: opt_check = true
 				elif opt in ["C", "check-full"]: opt_check_full = true
-				elif opt in ["H", "hash-map-hash"]: opt_hm_hash = true
+				elif opt == "print-hm-hash": opt_hm_hash = true
+				elif opt == "print-file-hash": opt_file_hash = true
 				elif val == "": opt_empty_check(); opt_last = opt
 				else: opt_set(opt, val)
 			of cmdArgument:
@@ -235,32 +242,35 @@ proc main(argv: seq[string]) =
 		hm_blk = newSeq[byte](hm_len)
 		hm_blk_new = newSeq[byte](hm_len)
 		hm_blk_zero = newSeq[byte](hm_len)
-		hm_hash_ctx: EVP_MD_CTX
 
 		hdr_magic = IDCAS_MAGIC
 		hdr_len = hdr_magic.len + 11
 		hdr_pad = newSeq[byte](hm_pos - hdr_len) # block alignment, if works with hm_len/fs
+
+		hash_hm: EVP_MD_CTX
+		hash_file: EVP_MD_CTX
 
 		st_lb_chk = 0
 		st_lb_upd = 0
 		st_sb_chk = 0
 		st_sb_upd = 0
 
-	template hm_hash_init =
-		hm_hash_ctx = EVP_MD_CTX_new()
-		bh_res = EVP_DigestInit(hm_hash_ctx, bh_md)
-		if bh_res != 1'i32: err_quit "hash-map-hash init failed"
-	template hm_hash_update(buff: seq[byte]) =
-		if not opt_hm_hash: return
-		bh_res = EVP_DigestUpdate(hm_hash_ctx, buff[0].addr, buff.len.cint)
-		if bh_res != 1'i32: err_quit "hash-map-hash update failed"
-	proc hm_hash_finalize: string =
+	template hash_init(ctx: EVP_MD_CTX) =
+		ctx = EVP_MD_CTX_new()
+		bh_res = EVP_DigestInit(ctx, bh_md)
+		if bh_res != 1'i32: err_quit "hash init failed"
+	template hash_update(ctx: EVP_MD_CTX, buff: seq[byte], bs=0) =
+		bh_res = EVP_DigestUpdate(
+			ctx, buff[0].addr, cint(if bs != 0: bs else: buff.len) )
+		if bh_res != 1'i32: err_quit "hash update failed"
+	proc hash_finalize(ctx: EVP_MD_CTX): string =
 		result = newString(bh_md_len)
-		bh_res = EVP_DigestFinal(hm_hash_ctx, result[0].addr, bh_len.addr)
+		bh_res = EVP_DigestFinal(ctx, result[0].addr, bh_len.addr)
 		if bh_res != 1'i32 or bh_len != bh_md_len.cint:
-			err_quit "hash-map-hash finalize failed"
-		EVP_MD_CTX_free(hm_hash_ctx)
-	if opt_hm_hash: hm_hash_init()
+			err_quit "hash finalize failed"
+		EVP_MD_CTX_free(ctx)
+	if opt_hm_hash: hash_init(hash_hm)
+	if opt_file_hash: hash_init(hash_file)
 
 
 	# Check if header matches all options, or replace it and zap the file
@@ -275,7 +285,7 @@ proc main(argv: seq[string]) =
 		hdr_bs = opt_sbs.uint32.htonl
 		copyMem(hdr_str[hdr_magic.len + 6].addr, hdr_bs.addr, 4)
 		var hdr_code = cast[seq[byte]](hdr_str)
-		hm_hash_update(hdr_code)
+		if opt_hm_hash: hash_update(hash_hm, hdr_code)
 
 		var hdr_file = newSeq[byte](hdr_len)
 		hm.setFilePos(0)
@@ -293,7 +303,7 @@ proc main(argv: seq[string]) =
 
 	if hm.readBytes(hdr_pad, 0, hdr_pad.len) != hdr_pad.len:
 		hm.setFilePos(hm_pos)
-	hm_hash_update(hdr_pad)
+	if opt_hm_hash: hash_update(hash_hm, hdr_pad)
 
 
 	# Scan and update file blocks
@@ -314,11 +324,12 @@ proc main(argv: seq[string]) =
 		hash_block( lb_buff[0], lbs.cint, hm_blk_new[0],
 			&"Hashing failed on LB#{st_lb_chk} [{lbs.sz} at {src.getFilePos-lbs}]" )
 		st_lb_chk += 1
+		if opt_file_hash: hash_update(hash_file, lb_buff, lbs)
 
 		block lb_check_update:
 			hm_bs = hm.readBytes(hm_blk, 0, hm_len)
 			if hm_bs == hm_len and hash_cmp(hm_blk[0], hm_blk_new[0]):
-				hm_hash_update(hm_blk)
+				if opt_hm_hash: hash_update(hash_hm, hm_blk)
 				break
 			if opt_check: quit 1
 			if hm_bs < hm_len: zeroMem(hm_blk[hm_bs].addr, hm_len - hm_bs)
@@ -354,7 +365,7 @@ proc main(argv: seq[string]) =
 				hm.setFilePos(hm_pos)
 				if hm.writeBytes(hm_blk_new, 0, hm_len) != hm_len:
 					err_quit &"Failed to replace hash-map-file block [at {hm_pos}]"
-				hm_hash_update(hm_blk_new)
+				if opt_hm_hash: hash_update(hash_hm, hm_blk_new)
 
 		lb_pos += opt_lbs
 		hm_pos += hm_len
@@ -378,7 +389,8 @@ proc main(argv: seq[string]) =
 			dst_sz_diff = if dst_sz_bs > 0: "+" else: "-"
 			dst_sz_diff = &" [{dst_sz_diff}{abs(dst_sz_bs).sz}]"
 
-	if opt_hm_hash: echo hm_hash_finalize().toHex.toLowerAscii
+	if opt_hm_hash: echo hash_finalize(hash_hm).toHex.toLowerAscii
+	if opt_file_hash: echo hash_finalize(hash_file).toHex.toLowerAscii
 	if opt_verbose:
 		echo( &"Stats: {src.getFilePos.sz} file{dst_sz_diff}" &
 			&" + {hm.getFilePos.sz} hash-map :: {st_lb_chk} LBs," &
