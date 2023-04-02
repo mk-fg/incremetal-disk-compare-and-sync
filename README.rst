@@ -7,8 +7,8 @@ operations as possible.
 
 It is useful when source is fast (e.g. local SSD), but destination is
 either slow (like network or USB-HDD), or has limited write endurance
-(cloning large partitions between SSDs, for example), as well as some
-other more specialized use-cases - see below.
+(cloning large partitions/files between SSDs, for example), as well
+as some other more specialized use-cases - see below.
 
 .. contents::
   :backlinks: none
@@ -150,10 +150,10 @@ sure to look at those first.
   - After completion, run ``sync`` or such to flush pending writes to disk, and rename
     ``hash-map-file.new`` to persistent place after that, atomically replacing earlier file.
 
-  Interruption/restart during this will at worst redo some copying from the old hash-map.
+  Interruption/restart during this will at worst redo some copying using same old hash-map.
 
-- Anything to do with multiple files/directories on a filesystem - works between
-  single explicitly-specified src/dst paths directly, and that's it.
+- Anything to do with multiple files/directories on a filesystem - tool operates
+  on single explicitly-specified src/dst files directly, and that's it.
 
   casync_ and various incremental backup solutions are good for recursive stuff.
 
@@ -184,14 +184,15 @@ sure to look at those first.
 - Any kind of permissions and file metadata - only file contents are synchronized.
 
 It is also **not** a good replacement for btrfs_/zfs_ send/recv replication
-functionality, and should work much worse with these and other copy-on-write
-filesystems, because they basically log all changes made to them, not overwrite
-same blocks in-place, producing massive diffs in underlying storage even when
-final delta ends up being tiny or non-existant.
+functionality, and should work much worse when synchronising underlying devices
+for these and other copy-on-write filesystems, because they basically log all
+changes made to them, not overwrite same blocks in-place, producing massive
+diffs in underlying storage even when final delta ends up being tiny or
+non-existant.
 
-Which is why they have much more efficient fs-level incremental replication
-built into them - it should be a much better option than a "dumb" block-level
-replication for those.
+Which is (partly) why they have much more efficient fs-level incremental
+replication built into them - it should be a much better option than a "dumb"
+block-level replication of underlying storage for those.
 
 .. _rsync: https://rsync.samba.org/
 .. _rdiff: https://librsync.github.io/page_rdiff.html
@@ -236,7 +237,7 @@ In special modes, like building hash-map-file or validation-only, process is
 simplified to remove updating destination/hash-map steps that aren't relevant.
 
 ``--print-file-hash`` and ``--print-hm-hash`` options, if specified, calculate
-their hashes from file reads/writes as they happen during this process anyway.
+their hashes from file reads/writes as they happen during this process.
 
 Hash-map file has a header with LB/SB block sizes, and if those don't match
 exactly, it is truncated/discarded as invalid and gets rebuilt from scratch,
@@ -260,15 +261,15 @@ Can also be overidden using ``-B/--block-large`` and ``-b/--block-small``
 command-line options at runtime.
 
 When changing those, it might be a good idea to run the tool only on dst-file
-first, without src-file argument, to read it and rebuild hash-map from scratch,
+first, without src-file argument, to read it and rebuild its hash-map from scratch,
 so that subsequent run with same parameters can use that, instead of doing full
-copy (and a lot of writes intead of reads).
+copy (and all-writes in place of mostly-reads).
 
 While using the tool from scripts, ``-M/--hash-map-update`` option can be added
 to treat missing or invalid hash-map-file as an error, as it should probably always
 be there for routine runs, and should never be rebuilt anew with a complete resync
 by such scripts.
 
-Hash-map file format is not tied to current host's type sizes or endianness.
+Hash-map file format is not tied to current host's C type sizes or endianness.
 
 .. _BLAKE2s: https://en.wikipedia.org/wiki/BLAKE_(hash_function)

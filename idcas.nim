@@ -74,12 +74,12 @@ proc main_help(err="") =
 		Hash-map file in this example is generated/updated as /mnt/usb-hdd/vm.img.bak{IDCAS_HM_EXT}
 		Hash function used in hash-map-file is always 32B BLAKE2s from OpenSSL.
 
-		Arguments and options (in "{app} [options] [src-file] dst-file"):
+		Arguments and options (in "{app} [options] [src-file] dst-file" command):
 
 			<src-file>
 				Source file to read and copy/update both hash-map-file and dst-file from.
 				Always read from start to finish in a single pass, so can also be a fifo pipe.
-				If not specified, hash-map-file for dst-file is created/updated, nothing copied.
+				If omitted, hash-map-file for dst-file is created/updated, nothing copied.
 
 			<dst-file>
 				Destination file to update in-place from src-file according to hash-map-file
@@ -125,7 +125,7 @@ proc main_help(err="") =
 			--print-file-hash
 				Same as --print-hm-hash, but prints BLAKE2b hash for processed file(s).
 				Will be calculated from src-file reads, if specified, or dst-file reads otherwise.
-				If both --print-*-hash options are specified, this will be second hash line on stdout.
+				If both --print-*-hash options are used, this will be second hash line on stdout.
 
 			-v/--verbose
 				Print transfer statistics to stdout before exiting.
