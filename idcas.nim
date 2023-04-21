@@ -149,7 +149,7 @@ proc main(argv: seq[string]) =
 	block cli_parser:
 		var opt_last = ""
 		proc opt_fmt(opt: string): string =
-			return if opt.len == 1: &"-{opt}" else: &"--{opt}"
+			if opt.len == 1: &"-{opt}" else: &"--{opt}"
 		proc opt_empty_check =
 			if opt_last == "": return
 			main_help &"{opt_fmt(opt_last)} option unrecognized or requires a value"

@@ -56,8 +56,24 @@ Usage example::
 
 See below for more information on how it works and what it can be suitable for.
 
+Additional Dockerfile_ in the repository can be used to build a static portable
+"idcas" binary, which should work on any same-arch linux distro without any
+library dependencies - useful for data-recovery scenarios, when booting arbitrary
+distros like grml_ or SystemRescue_ from a USB stick.
+
+With usable/running docker on the system, following command should produce
+static "idcas" binary in the current directory (about 3.2M is size)::
+
+  docker buildx build --output type=local,dest=. .
+
+Any non-default compiled-in parameters can be added on ``RUN nim c ...`` line in
+the Dockerfile.
+
 .. _Nim: https://nim-lang.org/
 .. _OpenSSL: https://www.openssl.org/
+.. _Dockerfile: Dockerfile
+.. _grml: https://grml.org/
+.. _SystemRescue: https://www.system-rescue.org/
 
 
 Description
