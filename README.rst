@@ -86,17 +86,13 @@ blocks to destination on mismatches there, and updating hash-map with new hash(-
 It's somewhat similar to how common rsync_ and rdiff_ tools work,
 but much simplier, side-stepping following limitations imposed by those:
 
-- rsync always reads whole source file, and cannot use block device destination.
-
-  One reason for latter limitation is due to how its delta-xfer algorithm
-  works - it support moving data around, which can only be done efficiently
-  when creating a new file copy.
+- rsync always re-reads whole source/destination files.
 
 - rdiff can also create "signature" (hash-map) of the file, but does not allow
   updating destination in-place, always has to reconstruct full copy of it,
   even if it's 1B difference in a 100 GiB file.
 
-  Likely reason for that is same as with rsync - can't easily move/clone/dedup
+  Likely reason for that is using rsync's algorithm - can't easily move/clone/dedup
   data blocks without copy, which it's kinda intended to do efficiently.
 
 - rdiff file "signatures" are unnecessarily large, because all blocks in those
@@ -120,7 +116,7 @@ Intended use-cases include:
   if it is just an unchanged old copy, or (C) do a copy-replace of sda.img destination,
   instead of only overwriting changed bits.
 
-  rsync/rdiff do some of those, this tool does neither.
+  cat/dd/rsync/rdiff tools do some of those, this one does neither.
 
 - Efficient backups utilizing btrfs_ reflinks and its copy-on-write design.
 
@@ -169,7 +165,7 @@ sure to look at those first.
   Interruption/restart during this will at worst redo some copying using same old hash-map.
 
 - Anything to do with multiple files/directories on a filesystem - tool operates
-  on single explicitly-specified src/dst files directly, and that's it.
+  on a single explicitly-specified src/dst files directly, and that's it.
 
   casync_ and various incremental backup solutions are good for recursive stuff.
 
@@ -203,12 +199,14 @@ It is also **not** a good replacement for btrfs_/zfs_ send/recv replication
 functionality, and should work much worse when synchronising underlying devices
 for these and other copy-on-write filesystems, because they basically log all
 changes made to them, not overwrite same blocks in-place, producing massive
-diffs in underlying storage even when final delta ends up being tiny or
-non-existant.
+diffs in underlying storage even when actual user-visible delta ends up being
+tiny or non-existant.
 
 Which is (partly) why they have much more efficient fs-level incremental
 replication built into them - it should be a much better option than a "dumb"
-block-level replication of underlying storage for those.
+block-level replication of underlying storage for those, aside from potential
+issues with copying fs corruption or security implications (i.e. allows for
+possibility of destroying filesystem on the receiving end).
 
 .. _rsync: https://rsync.samba.org/
 .. _rdiff: https://librsync.github.io/page_rdiff.html
