@@ -318,7 +318,9 @@ proc main(argv: seq[string]) =
 		cmpMem(s1.addr, s2.addr, bh_md_len) == 0
 
 	while not eof:
-		lbs = src.readBytes(lb_buff, 0, opt_lbs)
+		try: lbs = src.readBytes(lb_buff, 0, opt_lbs)
+		except IOError:
+			err_quit &"File read #{st_lb_chk} failed at {lb_pos} B offset [{lb_pos.sz}]"
 		if lbs < opt_lbs:
 			eof = src.endOfFile
 			if not eof: err_quit "File read failed"
