@@ -41,6 +41,7 @@ proc sz(v: int|int64): string =
 	formatSize(v, includeSpace=true).replacef(re"(\.\d)\d+", "$1")
 
 proc err_quit(s: string) = quit "ERROR: " & s
+proc err_warn(s: string) = writeLine(stderr, "WARNING: " & s); flushFile(stderr)
 
 proc main_help(err="") =
 	proc print(s: string) =
@@ -117,6 +118,14 @@ proc main_help(err="") =
 				Similar to -c/--check, but checks all hash-map blocks in the file,
 					and prints stats/hashes if -v/--verbose or --print-*-hash options are also used.
 
+			--skip-read-errors
+				Skip file read errors with -b/--block-small granularity,
+					putting always-invalid all-zero hashes into hash-map for those blocks.
+				This can be used to best-effort-read from a faulty device/fs,
+					or mark position of bad blocks in hash-map-file and make sparse-patch
+					for those from another file (e.g. a backup), without comparing them directly.
+				Default is to abort and exit upon encountering any I/O error.
+
 			--print-hm-hash
 				Print hex-encoded BLAKE2b 512-bit hash line (no key/salt/person) of resulting
 					hash-map file to stdout, matching "b2sum" or "openssl dgst" command outputs for it.
@@ -145,6 +154,7 @@ proc main(argv: seq[string]) =
 		opt_check_full = false
 		opt_hm_hash = false
 		opt_file_hash = false
+		opt_skip_errs = false
 
 	block cli_parser:
 		var opt_last = ""
@@ -170,6 +180,7 @@ proc main(argv: seq[string]) =
 				elif opt in ["C", "check-full"]: opt_check_full = true
 				elif opt == "print-hm-hash": opt_hm_hash = true
 				elif opt == "print-file-hash": opt_file_hash = true
+				elif opt == "skip-read-errors": opt_skip_errs = true
 				elif val == "": opt_empty_check(); opt_last = opt
 				else: opt_set(opt, val)
 			of cmdArgument:
@@ -180,18 +191,20 @@ proc main(argv: seq[string]) =
 		opt_empty_check()
 
 		if opt_src == "" and opt_dst == "":
-			main_help("Missing src/dst file arguments")
+			main_help "Missing src/dst file arguments"
 		elif opt_dst == "":
 			opt_dst = opt_src; opt_src = ""
 		if opt_hm_file == "":
 			opt_hm_file = &"{opt_dst}{IDCAS_HM_EXT}"
 		if opt_lbs <= opt_sbs or opt_lbs %% opt_sbs != 0:
-			main_help("Large/small block sizes mismatch - must be divisible")
+			main_help "Large/small block sizes mismatch - must be divisible"
 		if (opt_check or opt_check_full) and opt_src != "":
-			main_help("Check options only work with a single file argument")
+			main_help "Check options only work with a single file argument"
+		if opt_skip_errs and opt_lbs / opt_sbs >= 65536:
+			err_quit "--skip-read-errors option doesn't allow lbs / sbs >= 2^16"
 
 
-	# Open hash-map / source / destination files
+	### Open hash-map / source / destination files
 
 	var
 		src: File
@@ -221,7 +234,7 @@ proc main(argv: seq[string]) =
 	defer: src.close; dst.close
 
 
-	# State vars get reused for all blocks
+	### State vars get reused for all blocks
 
 	var
 		lbs: int
@@ -240,6 +253,7 @@ proc main(argv: seq[string]) =
 		hm_sbc = int(opt_lbs / opt_sbs)
 		hm_len = bh_md_len + bh_md_len * hm_sbc
 		hm_pos: int64 = clamp(hm_len, 64, 4096)
+		hm_errs: set[uint16]
 		hm_blk = newSeq[byte](hm_len)
 		hm_blk_new = newSeq[byte](hm_len)
 		hm_blk_zero = newSeq[byte](hm_len)
@@ -255,8 +269,10 @@ proc main(argv: seq[string]) =
 
 		st_lb_chk = 0
 		st_lb_upd = 0
+		st_lb_err = 0
 		st_sb_chk = 0
 		st_sb_upd = 0
+		st_sb_err = 0
 
 	template hash_init(ctx: EVP_MD_CTX) =
 		ctx = EVP_MD_CTX_new()
@@ -276,7 +292,7 @@ proc main(argv: seq[string]) =
 	if opt_file_hash: hash_init(hash_file)
 
 
-	# Check if header matches all options, or replace it and zap the file
+	### Check if header matches all options, or replace it and zap the file
 
 	block hm_hdr_check:
 		var
@@ -309,37 +325,72 @@ proc main(argv: seq[string]) =
 	if opt_hm_hash: hash_update(hash_hm, hdr_pad)
 
 
-	# Scan and update file blocks
+	### Scan and update file blocks
 
-	template hash_block(src: byte, src_len: cint, dst: byte, err_msg: string) =
-		bh_res = EVP_Digest(src.addr, src_len, dst.addr, bh_len.addr, bh_md, nil)
-		if bh_res != 1'i32 or bh_len != bh_md_len.cint: err_quit err_msg
-	template hash_cmp(s1, s2: byte): bool =
+	template hash_same(s1, s2: byte): bool =
 		cmpMem(s1.addr, s2.addr, bh_md_len) == 0
 
-	while not eof:
-		try: lbs = src.readBytes(lb_buff, 0, opt_lbs)
-		except IOError:
-			err_quit &"File read #{st_lb_chk} failed at {lb_pos} B offset [{lb_pos.sz}]"
-		if lbs < opt_lbs:
+	template hash_block(src: byte, src_len: int, dst: byte) =
+		bh_res = EVP_Digest(src.addr, src.cint, dst.addr, bh_len.addr, bh_md, nil)
+		if bh_res != 1'i32 or bh_len != bh_md_len.cint: err_quit "hash-op failed"
+		while true: # hm_blk_zero (all-zeroes) is not used as a valid hash
+			if not hash_same(dst, hm_blk_zero[0]): break
+			bh_res = EVP_Digest(dst.addr, bh_len, dst.addr, bh_len.addr, bh_md, nil)
+			if bh_res != 1'i32 or bh_len != bh_md_len.cint: err_quit "hash-op failed"
+
+	template lb_buff_read(sz: int, offset: int, bs: int) =
+		sz = src.readBytes(lb_buff, offset, bs)
+		if sz < bs:
 			eof = src.endOfFile
 			if not eof: err_quit "File read failed"
-			if lbs == 0: continue
+			if sz == 0: break
 
-		hash_block( lb_buff[0], lbs.cint, hm_blk_new[0],
-			&"Hashing failed on LB#{st_lb_chk} [{lbs.sz} at {src.getFilePos-lbs}]" )
+	while not eof:
+
+		# Read lb_buff, with a fallback for --skip-read-errors
+		try:
+			lb_buff_read(lbs, 0, opt_lbs)
+			if hm_errs.card > 0: hm_errs = {}
+
+		except IOError:
+			let err = &"LB#{st_lb_chk} [{opt_lbs.sz}]" &
+				&" read failed at {lb_pos} B offset [{lb_pos.sz}]"
+			if not opt_skip_errs: err_quit err
+			err_warn err
+			st_lb_err += 1
+
+			# Fill lb_buff by SBs, collecting failed reads in hm_errs
+			lbs = 0; hm_errs = {}
+			src.setFilePos(lb_pos)
+			for n in 0..<hm_sbc:
+				try: lb_buff_read(sbs, n * opt_sbs, opt_sbs)
+				except IOError: # add to hm_errs and skip over this SB
+					err_warn &"  SB#{n} [{opt_sbs.sz}]" &
+						&" read failed at {lb_pos + n * opt_sbs} B offset"
+					hm_errs.incl(n.uint16)
+					src.setFilePos(lb_pos + (n + 1) * opt_sbs)
+					sbs = opt_sbs
+				lbs += sbs
+			if lbs == 0: continue
+			src.setFilePos(lb_pos + lbs)
+
+		# LB hash/skip check
+		if hm_errs.card == 0: hash_block(lb_buff[0], lbs, hm_blk_new[0])
+		else: zeroMem(hm_blk_new[0].addr, bh_md_len)
+
 		st_lb_chk += 1
 		if opt_file_hash: hash_update(hash_file, lb_buff, lbs)
 
 		block lb_check_update:
 			hm_bs = hm.readBytes(hm_blk, 0, hm_len)
-			if hm_bs == hm_len and hash_cmp(hm_blk[0], hm_blk_new[0]):
+			if hm_bs == hm_len and hash_same(hm_blk[0], hm_blk_new[0]):
 				if opt_hm_hash: hash_update(hash_hm, hm_blk)
-				break
+				if hm_errs.card == 0: break # broken LBs always get re-checked
 			if opt_check: quit 1
 			if hm_bs < hm_len: zeroMem(hm_blk[hm_bs].addr, hm_len - hm_bs)
 			st_lb_upd += 1
 
+			# SB checks/updates
 			sbs = opt_sbs
 			for n in 0..<hm_sbc:
 				hm_bs = bh_md_len * (n + 1)
@@ -347,16 +398,15 @@ proc main(argv: seq[string]) =
 				if lbs <= 0: break
 				lbs -= opt_sbs
 				if lbs < 0: sbs += lbs # short SB at EOF
-
-				hash_block( lb_buff[opt_sbs * n], sbs.cint, hm_blk_new[hm_bs],
-					&"Hashing failed on SB#{n} in LB#{st_lb_chk}" )
-				while true: # hm_blk_zero is used to indicate missing SB - rehash if it pops-up
-					if not hash_cmp(hm_blk_new[hm_bs], hm_blk_zero[0]): break
-					hash_block( hm_blk_new[hm_bs], bh_md_len.cint, hm_blk_new[hm_bs],
-						&"Re-hashing failed on SB#{n} in LB#{st_lb_chk}" )
 				st_sb_chk += 1
 
-				if hash_cmp(hm_blk[hm_bs], hm_blk_new[hm_bs]): continue
+				if n.uint16 in hm_errs: # broken data - no check/copy
+					zeroMem(hm_blk_new[hm_bs].addr, bh_md_len)
+					st_sb_err += 1
+					continue
+
+				hash_block(lb_buff[opt_sbs * n], sbs, hm_blk_new[hm_bs])
+				if hash_same(hm_blk[hm_bs], hm_blk_new[hm_bs]): continue
 				st_sb_upd += 1
 
 				if dst != nil:
@@ -366,6 +416,7 @@ proc main(argv: seq[string]) =
 						err_quit &"Failed to replace dst-file SB {st_lb_chk}.{n} [at {sb_pos}]"
 					dst_pos = sb_pos + sbs
 
+			# HM block update
 			if not opt_check_full:
 				hm.setFilePos(hm_pos)
 				if hm.writeBytes(hm_blk_new, 0, hm_len) != hm_len:
@@ -376,7 +427,7 @@ proc main(argv: seq[string]) =
 		hm_pos += hm_len
 
 
-	# Sync file sizes, return/print results
+	### Sync file sizes, return/print results
 
 	if opt_check: quit 0
 	if not opt_check_full:
@@ -395,12 +446,21 @@ proc main(argv: seq[string]) =
 			dst_sz_diff = &" [{dst_sz_diff}{abs(dst_sz_bs).sz}]"
 
 	if opt_hm_hash: echo hash_finalize(hash_hm).toHex.toLowerAscii
-	if opt_file_hash: echo hash_finalize(hash_file).toHex.toLowerAscii
+	if opt_file_hash:
+		if st_lb_err > 0 or st_sb_err > 0:
+			err_warn "Resulting file-hash will be meaningless because of read errors"
+		echo hash_finalize(hash_file).toHex.toLowerAscii
 	if opt_verbose:
-		echo( &"Stats: {src.getFilePos.sz} file{dst_sz_diff}" &
-			&" + {hm.getFilePos.sz} hash-map :: {st_lb_chk} LBs," &
-			&" {st_lb_upd} updated :: {st_sb_chk} SBs compared," &
-			&" {st_sb_upd} copied :: {(st_sb_upd * opt_sbs).sz} data diffs" )
+		var errs_lb = ""; var errs_sb = ""
+		if opt_skip_errs:
+			if st_lb_err > 0: errs_lb = &", {st_lb_err} with read-errors"
+			if st_sb_err > 0: errs_sb = &" + {st_sb_err} errs"
+		echo(
+			&"Stats: {src.getFilePos.sz} file{dst_sz_diff} + {hm.getFilePos.sz} hash-map" &
+			&" :: {(st_sb_upd * opt_sbs).sz} data diffs" )
+		echo(
+			&"  Blocks: {st_lb_chk} LBs, {st_lb_upd} mismatch{errs_lb} ::" &
+			&" {st_sb_chk} SBs checked, {st_sb_upd} updated{errs_sb}" )
 
 	if opt_check_full and st_lb_upd > 0: quit 1
 

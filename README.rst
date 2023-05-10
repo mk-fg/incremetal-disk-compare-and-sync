@@ -25,7 +25,7 @@ Build and usage
 
 This tool is written in Nim_ C-adjacent language, linked against OpenSSL_ (libcrypto).
 
-Build it with: ``nim c -d:release idcas.nim && strip idcas``
+Build it with: ``nim c -d:release --opt:speed idcas.nim && strip idcas``
 
 Test and usage info: ``./idcas -h``
 
@@ -138,6 +138,12 @@ Intended use-cases include:
 
   Sometimes you just have to tweak minor stuff on source dev, or have some old
   copy otherwise, and doing full clone over that is a waste of time and SSD cycles.
+
+- Efficient copy/update/fix for files with read errors in them.
+
+  ``--skip-read-errors`` option allows to set hashes for unreadable blocks to
+  invalid values (and skip them otherwise), which can then be used in various
+  ways to copy/replace only those small corrupted blocks from elsewhere.
 
 For most other uses, aforementioned rdiff_ and rsync_ tools might be good enough
 (see rsync's --partial, --inplace and --append-verify opts in particular) - make
