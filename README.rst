@@ -145,6 +145,17 @@ Intended use-cases include:
   invalid values (and skip them otherwise), which can then be used in various
   ways to copy/replace only those small corrupted blocks from elsewhere.
 
+  For example, to overwrite/fix couple unreadable data blocks on btrfs,
+  where checksumming got broken due to racey KVM disk-image pages passthrough
+  or something like that (but data itself is fine otherwise)::
+
+    % idcas -vm /tmp/vm.img.hm --skip-read-errors /mnt/btrfs/vm.img
+    % umount /mnt/btrfs && mount -o ro,rescue=ignoredatacsums /mnt/btrfs
+    % idcas -vm /tmp/vm.img.hm /mnt/btrfs/vm.img /tmp/vm.img.bad-csum-blocks-only
+    % umount /mnt/btrfs && mount /mnt/btrfs
+    % bmaptool copy /tmp/vm.img.bad-csum-blocks-only /mnt/btrfs/vm.img
+    % idcas -cm /tmp/vm.img.hm /mnt/btrfs/vm.img && echo "verified all-good!"
+
 For most other uses, aforementioned rdiff_ and rsync_ tools might be good enough
 (see rsync's --partial, --inplace and --append-verify opts in particular) - make
 sure to look at those first.
@@ -233,6 +244,10 @@ More technical and usage info
 Whole operation is broken into following steps:
 
 - Large Blocks (LBs, ~4 MiB by default) are read sequentially from source into memory.
+
+  There's an exception is with ``--skip-read-errors`` option when read fails -
+  then same LB will be read in SB chunks, mapping which exact SBs fail to read,
+  to skip data from those later and write their checksum as all-zeroes reserved value.
 
 - For each such block, corresponding hash-map-file block is read (4 KiB by default).
 
