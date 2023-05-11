@@ -1,7 +1,7 @@
 #? replace(sub = "\t", by = "  ")
 #
 # Debug build/run: nim c -w=on --hints=on -r idcas.nim -h
-# Final build: nim c -d:release idcas.nim && strip idcas
+# Final build: nim c -d:release --opt:speed idcas.nim && strip idcas
 # Usage info: ./idcas -h
 
 import strformat, strutils, parseopt, os, posix, re
@@ -201,6 +201,7 @@ proc main(argv: seq[string]) =
 		if (opt_check or opt_check_full) and opt_src != "":
 			main_help "Check options only work with a single file argument"
 		if opt_skip_errs and opt_lbs / opt_sbs >= 65536:
+			# This is due to using set[unit16] nim bit-vector, where uint16 is the limit
 			err_quit "--skip-read-errors option doesn't allow lbs / sbs >= 2^16"
 
 
