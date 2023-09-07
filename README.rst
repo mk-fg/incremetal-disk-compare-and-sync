@@ -25,7 +25,9 @@ Build and usage
 
 This tool is written in Nim_ C-adjacent language, linked against OpenSSL_ (libcrypto).
 
-Build it with: ``nim c -d:release --opt:speed idcas.nim && strip idcas``
+| Build with the usual "make": ``make``
+| ...or alternatively: ``nim c -d:release --opt:speed idcas.nim && strip idcas``
+|
 
 Test and usage info: ``./idcas -h``
 
@@ -245,7 +247,7 @@ Whole operation is broken into following steps:
 
 - Large Blocks (LBs, ~4 MiB by default) are read sequentially from source into memory.
 
-  There's an exception is with ``--skip-read-errors`` option when read fails -
+  There's an exception with ``--skip-read-errors`` option when read fails -
   then same LB will be read in SB chunks, mapping which exact SBs fail to read,
   to skip data from those later and write their checksum as all-zeroes reserved value.
 
