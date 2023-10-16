@@ -126,15 +126,10 @@ Intended use-cases include:
   copy-on-write clone of a file on btrfs, after which, applying small update to
   ``vm.img`` (as this tool does) results in a very efficient fs-level data deduplication.
 
-- Making sparse binary-delta files, which are easy to copy/apply using bmap-tools_.
+- Making sparse binary-delta files, which can be deflated via compression or bmap-tools_.
 
   Running this tool with a hash-map to detect changes, but to an empty destination
   file, will result in "sparse" file, where only changed blocks are "mapped".
-
-  Such sparse files can be stored/compressed efficiently, even without
-  copy-on-write filesystem/tricks, and bmaptool_ can easily copy only mapped
-  blocks to a non-sparse destination (i.e. "apply patch/delta" that way),
-  or convert those to/from non-sparse files as-needed.
 
 - Resumable/repeatable dumb-copy between two devices, to use instead of dd/ddrescue_.
 

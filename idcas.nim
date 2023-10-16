@@ -215,9 +215,14 @@ proc main(argv: seq[string]) =
 		hm: File
 		hm_fd: FileHandle
 
-	hm_fd = open(opt_hm_file.cstring, O_CREAT or O_RDWR, 0o600)
-	if hm_fd < 0 or not hm.open(hm_fd, fmReadWriteExisting):
-		err_quit &"Failed to open/create hash-map-file: {opt_hm_file}"
+	if opt_check or opt_check_full:
+		if not hm.open(opt_hm_file):
+			err_quit &"Failed to read-only open hash-map-file: {opt_hm_file}"
+	else:
+		hm_fd = open(opt_hm_file.cstring, O_CREAT or O_RDWR, 0o600)
+		if hm_fd < 0 or not hm.open( hm_fd,
+				if opt_check or opt_check_full: fmRead else: fmReadWriteExisting ):
+			err_quit &"Failed to open/create hash-map-file: {opt_hm_file}"
 	defer: hm.close
 
 	if opt_src != "":
@@ -310,7 +315,7 @@ proc main(argv: seq[string]) =
 		var hdr_file = newSeq[byte](hdr_len)
 		hm.setFilePos(0)
 		if hm.readBytes(hdr_file, 0, hdr_len) == hdr_len and
-			hdr_file == hdr_code: break
+			hdr_file == hdr_code: break hm_hdr_check
 
 		if opt_check: quit 1
 		if opt_check_full or opt_hm_update:
@@ -332,7 +337,7 @@ proc main(argv: seq[string]) =
 		cmpMem(s1.addr, s2.addr, bh_md_len) == 0
 
 	template hash_block(src: byte, src_len: int, dst: byte) =
-		bh_res = EVP_Digest(src.addr, src.cint, dst.addr, bh_len.addr, bh_md, nil)
+		bh_res = EVP_Digest(src.addr, src_len.cint, dst.addr, bh_len.addr, bh_md, nil)
 		if bh_res != 1'i32 or bh_len != bh_md_len.cint: err_quit "hash-op failed"
 		while true: # hm_blk_zero (all-zeroes) is not used as a valid hash
 			if not hash_same(dst, hm_blk_zero[0]): break
@@ -386,7 +391,7 @@ proc main(argv: seq[string]) =
 			hm_bs = hm.readBytes(hm_blk, 0, hm_len)
 			if hm_bs == hm_len and hash_same(hm_blk[0], hm_blk_new[0]):
 				if opt_hm_hash: hash_update(hash_hm, hm_blk)
-				if hm_errs.card == 0: break # broken LBs always get re-checked
+				if hm_errs.card == 0: break lb_check_update # broken LBs always get re-checked
 			if opt_check: quit 1
 			if hm_bs < hm_len: zeroMem(hm_blk[hm_bs].addr, hm_len - hm_bs)
 			st_lb_upd += 1
