@@ -40,7 +40,7 @@ Usage example::
 
   ## ...VM runs and stuff changes in vm.img after this...
 
-  # Fancy: make date/time-suffixed btrfs copy-on-write snapshot of vm.img backup
+  # Fancy: make date/time-suffixed btrfs/zfs copy-on-write snapshot of vm.img backup
   % cp --reflink /mnt/usb-hdd/vm.img.bak{,.$(date -Is)}
 
   # Efficiently update vm.img.bak file, overwriting only changed blocks in-place
@@ -124,11 +124,13 @@ Intended use-cases include:
 
   cat/dd/rsync/rdiff tools do some of those, this one does neither.
 
-- Efficient backups utilizing btrfs_ reflinks and its copy-on-write design.
+- Efficient image-file backups utilizing copy-on-write reflinks.
 
-  ``cp --reflink vm.img vm.img.old.$(date -Id)`` instantly creates a
-  copy-on-write clone of a file on btrfs, after which, applying small update to
-  ``vm.img`` (as this tool does) results in a very efficient fs-level data deduplication.
+  ``cp --reflink vm.img vm.img.old.$(date -Id)`` quickly creates a copy-on-write
+  clone of a file on btrfs_ and newer zfs_ versions, after which, applying small update
+  to ``vm.img`` (as this tool does) results in an efficient fs-level data deduplication.
+
+  (also ``--reflink`` should be auto-detected and used by default in modern cp)
 
 - Making sparse binary-delta files, which can be deflated via compression or bmap-tools_.
 
@@ -310,8 +312,9 @@ When using a non-existant (or sparse) destination file with pre-existing
 hash-map-file, "idcas" tool will create a sparse file there, which only includes
 changed blocks at correct offsets - a kind of binary diff or patch file.
 
-sparse_patch binary can then be used to only copy those actually-written non-sparse
-parts of that file over to destination, without touching anything else there.
+sparse_patch binary can then be used to only copy/apply those actually-written
+non-sparse parts of such patch-file to somewhere else (e.g. actual destination device),
+without touching anything else there.
 
 Most tools, when working with sparse files, tend to replicate them to destination
 (e.g. cp, rsync, bmaptool copy, etc), discarding data there as well, skip
