@@ -26,10 +26,9 @@ Build and usage
 This tool is written in Nim_ C-adjacent language, linked against OpenSSL_ (libcrypto).
 
 | Build with the usual "make": ``make``
-| ...or alternatively: ``nim c -d:release --opt:speed idcas.nim && strip idcas``
+| ... or alternatively: ``nim c -d:release --opt:speed idcas.nim && strip idcas``
+| Smoke-test and usage info: ``./idcas -h``
 |
-
-Test and usage info: ``./idcas -h``
 
 Installation: copy resulting binary to anywhere you can/intend-to run it from.
 
@@ -71,11 +70,16 @@ With usable/running docker on the system, following command should produce
 Any non-default parameters to compile with can be added on ``RUN nim c ...``
 lines in the Dockerfile.
 
+``make test`` or ``./test.sh`` can be used to run some basic functional tests on
+the produced binary, using tmpfs dir in /tmp, sparse_patch.nim_ and unreliablefs_
+fuse-filesystem (for ``--skip-read-errors`` option).
+
 .. _Nim: https://nim-lang.org/
 .. _OpenSSL: https://www.openssl.org/
 .. _Dockerfile: Dockerfile
 .. _grml: https://grml.org/
 .. _SystemRescue: https://www.system-rescue.org/
+.. _unreliablefs: https://github.com/ligurio/unreliablefs
 
 
 Description
@@ -128,8 +132,10 @@ Intended use-cases include:
 
 - Making sparse binary-delta files, which can be deflated via compression or bmap-tools_.
 
-  Running this tool with a hash-map to detect changes, but to an empty destination
-  file, will result in "sparse" file, where only changed blocks are "mapped".
+  Running this tool with a hash-map to detect changes, but to an empty destination file,
+  will result in a sparse file, where only changed blocks are mapped.
+  Trivial sparse_patch.nim_ tool in this repo can be used to efficiently copy only those
+  mapped chunks to a destination file/device, without touching anything else there.
 
 - Resumable/repeatable dumb-copy between two devices, to use instead of dd/ddrescue_.
 
@@ -139,19 +145,9 @@ Intended use-cases include:
 - Efficient copy/update/fix for files with read errors in them.
 
   ``--skip-read-errors`` option allows to set hashes for unreadable blocks to
-  invalid values (and skip them otherwise), which can then be used in various
-  ways to copy/replace only those small corrupted blocks from elsewhere.
-
-  For example, to overwrite/fix couple unreadable data blocks on btrfs,
-  where checksumming got broken due to racey KVM disk-image pages passthrough
-  or something like that (but data itself is fine otherwise)::
-
-    % idcas -vm /tmp/vm.img.hm --skip-read-errors /mnt/btrfs/vm.img
-    % umount /mnt/btrfs && mount -o ro,rescue=ignoredatacsums /mnt/btrfs
-    % idcas -vm /tmp/vm.img.hm /mnt/btrfs/vm.img /tmp/vm.img.bad-csum-blocks-only
-    % umount /mnt/btrfs && mount /mnt/btrfs
-    % bmaptool copy /tmp/vm.img.bad-csum-blocks-only /mnt/btrfs/vm.img
-    % idcas -cm /tmp/vm.img.hm /mnt/btrfs/vm.img && echo "verified all-good!"
+  special "invalid" values (and skip them otherwise), which can then be used in
+  various ways to copy/replace only those small corrupted blocks from elsewhere
+  (some other copy/snapshot maybe).
 
 For most other uses, aforementioned rdiff_ and rsync_ tools might be good enough
 (see rsync's --partial, --inplace and --append-verify opts in particular) - make
@@ -305,3 +301,29 @@ by such scripts.
 Hash-map file format is not tied to current host's C type sizes or endianness.
 
 .. _BLAKE2s: https://en.wikipedia.org/wiki/BLAKE_(hash_function)
+
+
+sparse_patch.nim
+----------------
+
+When using a non-existant (or sparse) destination file with pre-existing
+hash-map-file, "idcas" tool will create a sparse file there, which only includes
+changed blocks at correct offsets - a kind of binary diff or patch file.
+
+sparse_patch binary can then be used to only copy those actually-written non-sparse
+parts of that file over to destination, without touching anything else there.
+
+Most tools, when working with sparse files, tend to replicate them to destination
+(e.g. cp, rsync, bmaptool copy, etc), discarding data there as well, skip
+all-zero blocks, or are easy to misuse as such, which this sparse_patch tool
+explicitly does not and cannot do.
+
+It also uses `linux-3.1+ lseek() SEEK_DATA/SEEK_HOLE flags`_ for skipping over
+unmapped chunks efficiently, without mapping all blocks or extents via older
+ioctl() APIs, and is a very simple "seek/read/write loop" for this one task.
+
+| Can be built with: ``nim c -d:release --opt:size sparse_patch.nim && strip sparse_patch``
+| Usage info: ``./sparse_patch -h``
+
+.. _linux-3.1+ lseek() SEEK_DATA/SEEK_HOLE flags:
+  https://man.archlinux.org/man/lseek.2#Seeking_file_data_and_holes

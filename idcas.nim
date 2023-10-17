@@ -4,7 +4,7 @@
 # Final build: nim c -d:release --opt:speed idcas.nim && strip idcas
 # Usage info: ./idcas -h
 
-import strformat, strutils, parseopt, os, posix, re
+import std/[ strformat, strutils, parseopt, os, posix, re ]
 
 
 {.passl: "-lcrypto"}
