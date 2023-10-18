@@ -98,11 +98,11 @@ proc main(argv: seq[string]) =
 
 	if not src.open(opt_src):
 		err_quit &"Failed to read-only open source file: {opt_src}"
+	src_fd = src.getFileHandle()
 	if opt_dst != "":
 		dst_fd = open(opt_dst.cstring, O_CREAT or O_RDWR, 0o600)
-		if dst_fd < 0 or not dst.open(opt_dst, fmReadWriteExisting):
+		if dst_fd < 0 or not dst.open(dst_fd, fmReadWriteExisting):
 			err_quit &"Failed to open destination file for writing: {opt_dst}"
-	src_fd = src.getFileHandle()
 
 	src.setFilePos(pos)
 	while true:

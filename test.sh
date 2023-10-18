@@ -63,16 +63,18 @@ dd_patch 32K 3 37
 dd_patch 32K 1 2029
 dd_patch 1K 1 22247
 dd_patch 1K 1 56249
+dd_patch 80K 5 101
+upd_sbs=21 upd_kib=672
 
 # Test: changes get copied
-"$idcas" -v -m test.map test.bin test.patch | grep -q 'SBs checked, 8 updated'
-[[ $(du -BK test.patch | cut -f1) = 256K ]]
+"$idcas" -v -m test.map test.bin test.patch | grep -q "SBs checked, $upd_sbs updated"
+[[ $(du -BK test.patch | cut -f1) = ${upd_kib}K ]]
 "$idcas" -c -m test.map test.bin
 cp -a test.map{,.after-dd}
 
 # Test: sparse_patch copies chunks correctly
 rm -f test.patch.chk
-$sp -nv test.patch | grep -q 'copied 256 KiB'
+$sp -nv test.patch | grep -q "copied $upd_kib KiB"
 $sp -n test.patch test.patch.chk && [[ ! -e test.patch.chk ]]
 truncate -s $(stat -c%s test.patch) test.patch.chk
 $sp test.patch test.patch.chk
@@ -85,12 +87,12 @@ b2=$($b2sum test.patch.chk); $b2chk <<< "${b2%%.chk}"
 [[ $(du -BK test.patch.chk | cut -f1) = $(du -BK test.patch | cut -f1) ]]
 
 # Test: reverting changes is perfectly symmetrical
-"$idcas" -v -m test.map test.bin.orig test.bin | grep -q 'SBs checked, 8 updated'
+"$idcas" -v -m test.map test.bin.orig test.bin | grep -q "SBs checked, $upd_sbs updated"
 $b2chk <<< "$csum  test.bin"
 
 # Test: reusing old .map works same, still copies blocks, doesn't break anything
 cp -a test.map{.after-dd,}
-"$idcas" -v -m test.map test.bin.orig test.bin | grep -q 'SBs checked, 8 updated'
+"$idcas" -v -m test.map test.bin.orig test.bin | grep -q "SBs checked, $upd_sbs updated"
 $b2chk <<< "$csum  test.bin"
 
 # Randomize /dev/zero blocks for other tests to not match them weirdly
