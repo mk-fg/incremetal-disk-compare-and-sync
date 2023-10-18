@@ -1,13 +1,13 @@
 all: idcas
 
-idcas: idcas.nim
+%: %.nim
 	nim c -d:release --opt:speed $<
 	strip $@
 
 clean:
-	rm -f idcas
+	rm -f idcas sparse_patch
 
-test: idcas
+test: idcas sparse_patch
 	bash -m test.sh
 
 .SUFFIXES: # to disable built-in rules for %.c and such

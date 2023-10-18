@@ -179,7 +179,8 @@ sure to look at those first.
 - Anything to do with multiple files/directories on a filesystem - tool operates
   on a single explicitly-specified src/dst files directly, and that's it.
 
-  casync_ and various incremental backup solutions are good for recursive stuff.
+  casync_ and various incremental backup solutions (bup_, borg_, restic_, etc)
+  are good for recursive stuff.
 
 - Making smallest-possible separate binary patches - see xdelta3_ and
   compression tools.
@@ -196,10 +197,10 @@ sure to look at those first.
   Malicious tampering with the inputs/outputs is not considered here,
   use separate auth/encryption to prevent that as necessary.
 
-  Simple "compare blocks" design makes it optimal for syncing encrypted
-  devices/imgs/filesystems (e.g. LUKS volumes), with no time wasted on finding
-  similar or relocated data (impossible with any half-decent encryption system)
-  or trying to compress uniformly-random encrypted blocks.
+  Simple "compare blocks at same offset" design makes it optimal for syncing
+  encrypted devices/imgs/filesystems though (e.g. LUKS volumes), with no time
+  wasted on finding similar or relocated data (impossible with any half-decent
+  encryption system) or trying to compress uniformly-random encrypted blocks.
 
 - Syncing deltas from files with immutable source instead of immutable destination.
 
@@ -227,6 +228,9 @@ possibility of destroying filesystem on the receiving end).
 .. _ddrescue: https://www.gnu.org/software/ddrescue/ddrescue.html
 .. _bmap-tools: https://manpages.debian.org/testing/bmap-tools/bmaptool.1.en.html
 .. _casync: https://github.com/systemd/casync
+.. _bup: https://bup.github.io/
+.. _borg: https://www.borgbackup.org/
+.. _restic: https://restic.net/
 .. _xdelta3: http://xdelta.org/
 .. _zsync: http://zsync.moria.org.uk/
 .. _bittorrent: https://en.wikipedia.org/wiki/BitTorrent

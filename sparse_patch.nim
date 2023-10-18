@@ -26,7 +26,7 @@ proc main_help(err="") =
 		write(dst, s); write(dst, "\n")
 	let app = getAppFilename().lastPathPart
 	if err != "": print &"ERROR: {err}"
-	print &"\nUsage: {app} [opts] src-sparse-file.patch dest-file"
+	print &"\nUsage: {app} [opts] src-sparse-file dest-file"
 	if err != "":
 		print &"Run '{app} --help' for more information"
 		quit 0
