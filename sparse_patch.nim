@@ -90,7 +90,7 @@ proc main(argv: seq[string]) =
 		dst_fd: FileHandle
 		pos: int64 = 0
 		pos_to: int64 = 0
-		buff_len: int = 65_536
+		buff_len = 65_536
 		buff = newSeq[byte](buff_len)
 		bs = 0
 		st_bytes = 0

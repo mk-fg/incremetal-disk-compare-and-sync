@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -m
 set -eEo pipefail
 umask 077
 trap 'echo >&2 "----- FAILURE at line $LINENO :: $BASH_COMMAND"' ERR
@@ -143,6 +143,7 @@ cp -a test.map{,.corrupt}
 
 umount urfs
 kill $urfs_pid &>/dev/null ||:
+trap '' EXIT
 
 # Test: skipped (unreadable) blocks in HM should always be replaced with something meaningful
 if cmp -s test.bin{.corrupt,} ; then false - corrupt file ended up same as the original ; fi
