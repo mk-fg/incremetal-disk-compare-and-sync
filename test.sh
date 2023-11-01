@@ -23,6 +23,9 @@ b2chk="$b2sum --quiet -c"
 urfs=$(command -v unreliablefs)
 [[ -n "$urfs" ]] || { echo >&2 'ERROR: unreliablefs command not found'; exit 1; }
 
+bash_src=$(readlink -f "$0") # used to read predictable bytes
+[[ -n "$bash_src" ]] || { echo >&2 'ERROR: argv0-script not accessible'; exit 1; }
+
 
 mkdir -pm700 /tmp/idcas
 cd /tmp/idcas
@@ -43,8 +46,10 @@ dd_patch() {
 test_basics() {
 rm -f test.map
 
-dd_patch 32K 1 1000 /dev/zero
-dd_patch 32K 1 1005 /dev/urandom
+dd_patch 32K 1 1000 /dev/zero # 31.5M
+dd_patch 32K 1 1200 /dev/urandom # 37.5M
+dd_patch 1 1 15728681 /dev/zero # 15M
+dd_patch 1 1 74868347 "$bash_src" # 71.4M
 
 csum=$("$idcas" --print-file-hash -m test.map test.bin)
 $b2chk <<< "$csum  test.bin"
@@ -52,19 +57,21 @@ $b2chk <<< "$csum  test.bin"
 cp -a test.bin{,.orig}
 
 # Test: zero src/dst blocks aren't treated as special in any way
-dd_patch 32K 1 1000 /dev/urandom
-dd_patch 32K 1 1005 /dev/zero
+dd_patch 32K 1 1000 /dev/urandom # 31.5M
+dd_patch 32K 1 1200 /dev/zero # 37.5M
 
 # Test: changes get detected
 if "$idcas" -c -m test.map test.bin ; then false - changes not detected ; fi
 
 # Test: other random changes
-dd_patch 32K 3 37
-dd_patch 32K 1 2029
-dd_patch 1K 1 22247
-dd_patch 1K 1 56249
-dd_patch 80K 5 101
-upd_sbs=21 upd_kib=672
+dd_patch 1 1 15728681 "$bash_src" # 15M
+dd_patch 1 1 74868347 /dev/zero # 71.4M
+dd_patch 32K 3 37 # 1.15M
+dd_patch 32K 1 2029 # 63.4M
+dd_patch 1K 1 22247 # 21.7M
+dd_patch 1K 1 56249 # 54.9M
+dd_patch 80K 5 101 # 7.9M
+upd_sbs=23 upd_kib=736
 
 # Test: changes get copied
 "$idcas" -v -m test.map test.bin test.patch | grep -q "SBs checked, $upd_sbs updated"
@@ -96,7 +103,7 @@ cp -a test.map{.after-dd,}
 $b2chk <<< "$csum  test.bin"
 
 # Randomize /dev/zero blocks for other tests to not match them weirdly
-dd_patch 32K 1 1005
+dd_patch 32K 1 1200 # 37.5M
 
 }
 
