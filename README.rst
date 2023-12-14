@@ -319,18 +319,38 @@ changed blocks at correct offsets - a kind of binary diff or patch file.
 sparse_patch binary can then be used to only copy/apply those actually-written
 non-sparse parts of such patch-file to somewhere else (e.g. actual destination device),
 without touching anything else there.
+It's only used for tests here, but might be more useful generally.
+
+It uses `linux-3.1+ lseek() SEEK_DATA/SEEK_HOLE flags`_ for skipping over
+unmapped chunks efficiently, without mapping all blocks or extents via older
+ioctl() APIs, and is a very simple "seek/read/write loop" for this one task.
+
+| Can be built with: ``nim c -d:release --opt:size sparse_patch.nim && strip sparse_patch``
+| Usage info: ``./sparse_patch -h``
+|
+
+Especially if using custom block sizes (e.g. smaller than default 4096), make
+sure to test whether sparse files have enough granularity when relying on those.
+That is, whether sparse areas can start at smaller block offsets, or must be
+aligned to 512 or 4k blocks/pages on the specific OS/filesystem, for example.
 
 Most tools, when working with sparse files, tend to replicate them to destination
 (e.g. cp, rsync, bmaptool copy, etc), discarding data there as well, skip
 all-zero blocks, or are easy to misuse as such, which this sparse_patch tool
 explicitly does not and cannot do.
 
-It also uses `linux-3.1+ lseek() SEEK_DATA/SEEK_HOLE flags`_ for skipping over
-unmapped chunks efficiently, without mapping all blocks or extents via older
-ioctl() APIs, and is a very simple "seek/read/write loop" for this one task.
+I.e. they work assuming that destination file is sparse and should be as sparse
+as possible, while sparse_patch does kinda opposite - assumes that source file
+is meaningfully sparse, and whether destination one is kept sparse is irrelevant.
 
-| Can be built with: ``nim c -d:release --opt:size sparse_patch.nim && strip sparse_patch``
-| Usage info: ``./sparse_patch -h``
+For example, modern cp tool from coreutls_ can use SEEK_HOLE logic as well
+(if built with support for it, otherwise silently falls back to zero-byte-detection),
+but is also documented to "create a sparse DEST file whenever the SOURCE file
+contains a long enough sequence of zero bytes" when using ``--sparse`` option,
+which is distinct from only copying non-sparse extents from source - zero-bytes
+can be in a legitimate non-sparse source data too, and should be written to
+destination, never dropped like that.
 
 .. _linux-3.1+ lseek() SEEK_DATA/SEEK_HOLE flags:
   https://man.archlinux.org/man/lseek.2#Seeking_file_data_and_holes
+.. _coreutls: https://www.gnu.org/software/coreutils/
