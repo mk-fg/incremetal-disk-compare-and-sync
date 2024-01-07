@@ -63,12 +63,13 @@ any library dependencies in case of static one (useful for data-recovery scenari
 when e.g. booting arbitrary distros like grml_ or SystemRescue_ from a USB stick).
 
 With usable/running docker on the system, following command should produce
-"idcas" + "idcas.static" binaries in the current directory::
+"idcas.musl" + "idcas.static" binaries in the current directory::
 
   docker buildx build --output type=local,dest=. .
 
 Any non-default parameters to compile with can be added on ``RUN nim c ...``
-lines in the Dockerfile.
+lines in the Dockerfile. Unintuitive "don't know about --output" errors likely
+mean missing docker-buildx_ plugin (replaces legacy "docker build" command).
 
 ``make test`` or ``./test.sh`` can be used to run some basic functional tests on
 the produced binary, using tmpfs dir in /tmp, sparse_patch.nim_ and unreliablefs_
@@ -79,6 +80,7 @@ fuse-filesystem (for ``--skip-read-errors`` option).
 .. _Dockerfile: Dockerfile
 .. _grml: https://grml.org/
 .. _SystemRescue: https://www.system-rescue.org/
+.. _docker-buildx: https://docs.docker.com/go/buildx/
 .. _unreliablefs: https://github.com/ligurio/unreliablefs
 
 
