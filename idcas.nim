@@ -39,6 +39,7 @@ proc EVP_DigestFinal( md_ctx: EVP_MD_CTX,
 
 proc sz(v: int|int64): string =
 	formatSize(v, includeSpace=true).replacef(re"(\.\d)\d+", "$1")
+template nfmt(v: untyped): string = ($v).insertSep # format integer with digit groups
 
 proc err_quit(s: string) = quit "ERROR: " & s
 proc err_warn(s: string) = writeLine(stderr, "WARNING: " & s); flushFile(stderr)
@@ -459,14 +460,14 @@ proc main(argv: seq[string]) =
 	if opt_verbose:
 		var errs_lb = ""; var errs_sb = ""
 		if opt_skip_errs:
-			if st_lb_err > 0: errs_lb = &", {st_lb_err} with read-errors"
-			if st_sb_err > 0: errs_sb = &" + {st_sb_err} errs"
+			if st_lb_err > 0: errs_lb = &", {st_lb_err.nfmt} with read-errors"
+			if st_sb_err > 0: errs_sb = &" + {st_sb_err.nfmt} errs"
 		echo(
 			&"Stats: {src.getFilePos.sz} file{dst_sz_diff} + {hm.getFilePos.sz} hash-map" &
 			&" :: {(st_sb_upd * opt_sbs).sz} data diffs" )
 		echo(
-			&"  Blocks: {st_lb_chk} LBs, {st_lb_upd} mismatch{errs_lb} ::" &
-			&" {st_sb_chk} SBs checked, {st_sb_upd} updated{errs_sb}" )
+			&"  Blocks: {st_lb_chk.nfmt} LBs, {st_lb_upd.nfmt} mismatch{errs_lb} ::" &
+			&" {st_sb_chk.nfmt} SBs checked, {st_sb_upd.nfmt} updated{errs_sb}" )
 
 	if opt_check_full and st_lb_upd > 0: quit 1
 

@@ -56,6 +56,11 @@ $b2chk <<< "$csum  test.bin"
 "$idcas" -vC -m test.map test.bin >/dev/null
 cp -a test.bin{,.orig}
 
+# Looks: check verbose output formatting
+# "$idcas" -v -m test.map.v test.bin test.bin.v && rm test.map.v test.bin.v
+# # Stats: 101 MiB file [+101 MiB] + 108 KiB hash-map :: 101 MiB data diffs
+# #   Blocks: 26 LBs, 26 mismatch :: 3_232 SBs checked, 3_232 updated
+
 # Test: zero src/dst blocks aren't treated as special in any way
 dd_patch 32K 1 1000 /dev/urandom # 31.5M
 dd_patch 32K 1 1200 /dev/zero # 37.5M
@@ -147,6 +152,13 @@ for n in {1..20}; do [[ ! -e urfs/test.bin ]] || break; read -rt 0.1 <> <(:) ||:
 rm -f test.map
 "$idcas" -vm test.map --skip-read-errors urfs/test.bin test.bin.corrupt &>/dev/null
 cp -a test.map{,.corrupt}
+
+# Looks: check verbose output formatting
+# "$idcas" -v --skip-read-errors -m test.map.v urfs/test.bin test.bin.v && rm test.map.v test.bin.v
+# # WARNING: LB#9 [3.9 MiB] read failed at 37453824 B offset [35.7 MiB]
+# # WARNING: LB#15 [3.9 MiB] read failed at 62423040 B offset [59.5 MiB]
+# # Stats: 101 MiB file [+101 MiB] + 108 KiB hash-map :: 101 MiB data diffs
+# #   Blocks: 26 LBs, 26 mismatch, 2 with read-errors :: 3_232 SBs checked, 3_232 updated
 
 umount urfs
 kill $urfs_pid &>/dev/null ||:
