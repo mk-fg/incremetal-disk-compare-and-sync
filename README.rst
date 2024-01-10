@@ -92,7 +92,7 @@ block-by-block to existing hash-map-file info (if any), copying small changed
 blocks to destination on mismatches there, and updating hash-map with new hash(-es).
 
 It's somewhat similar to how common rsync_ and rdiff_ tools work,
-but much simplier, side-stepping following limitations imposed by those:
+but much simpler, side-stepping following limitations imposed by those:
 
 - rsync always re-reads whole source/destination files.
 
