@@ -447,7 +447,7 @@ proc main(argv: seq[string]) =
 			src_sz = src.getFilePos
 			dst_sz_bs = src_sz - dst_sz
 		if dst_fd.ftruncate(src_sz.int) != 0:
-			err_quit &"Failed to truncate dst-file"
+			err_warn &"Failed to truncate dst-file (ignore if it's a block device)"
 		if dst_sz_bs != 0:
 			dst_sz_diff = if dst_sz_bs > 0: "+" else: "-"
 			dst_sz_diff = &" [{dst_sz_diff}{abs(dst_sz_bs).sz}]"
