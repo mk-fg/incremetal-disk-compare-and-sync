@@ -143,8 +143,9 @@ Intended use-cases include:
 
 - Resumable/repeatable dumb-copy between two devices, to use instead of dd/ddrescue_.
 
-  Sometimes you just have to tweak minor stuff on source dev, or have some old
-  copy otherwise, and doing full clone over that is a waste of time and SSD cycles.
+  Sometimes you just have to tweak minor stuff on source dev and copy it again, or
+  copy things back to source device - having hashmap allows to only find/sync changes,
+  without another full clone, that is a waste of time and SSD cycles.
 
 - Efficient copy/update/fix for files with read errors in them.
 

@@ -213,6 +213,7 @@ proc main(argv: seq[string]) =
 		dst: File # nil if only one file is specified
 		dst_fd: FileHandle
 		dst_sz: int64
+		dst_is_dev: bool
 		hm: File
 		hm_fd: FileHandle
 
@@ -233,6 +234,10 @@ proc main(argv: seq[string]) =
 		if dst_fd < 0 or not dst.open(dst_fd, fmReadWriteExisting):
 			err_quit &"Failed to open dst-file: {opt_dst}"
 		dst_sz = dst.getFileSize
+		block dst_type_check:
+			var dst_st: Stat
+			if fstat(dst_fd, dst_st) != 0: err_quit &"Failed to stat dst-file: {opt_dst}"
+			dst_is_dev = S_ISBLK(dst_st.st_mode)
 
 	else:
 		if not src.open(opt_dst):
@@ -439,15 +444,15 @@ proc main(argv: seq[string]) =
 	if opt_check: quit 0
 	if not opt_check_full:
 		if hm_fd.ftruncate(hm.getFilePos.int) != 0:
-			err_quit &"Failed to truncate hash-map-file"
+			err_quit "Failed to truncate hash-map-file"
 
 	var dst_sz_diff = ""
 	if dst != nil:
 		let
 			src_sz = src.getFilePos
 			dst_sz_bs = src_sz - dst_sz
-		if dst_fd.ftruncate(src_sz.int) != 0:
-			err_warn &"Failed to truncate dst-file (ignore if it's a block device)"
+		if dst_fd.ftruncate(src_sz.int) != 0 and not dst_is_dev:
+			err_quit "Failed to truncate dst-file"
 		if dst_sz_bs != 0:
 			dst_sz_diff = if dst_sz_bs > 0: "+" else: "-"
 			dst_sz_diff = &" [{dst_sz_diff}{abs(dst_sz_bs).sz}]"
