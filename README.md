@@ -17,12 +17,14 @@ as some other more specialized use-cases - see below.
 
     - [Intended use-cases](#hdr-intended_use-cases_include_)
     - [Non-goals](#hdr-non-goals_for_this_tool_)
-    - [Known limitations](#hdr-known_limitations_to_address_sometime_later_)
 
 - [More technical and usage info](#hdr-more_technical_and_usage_info)
 - [sparse_patch.nim]
+- [Known limitations and things to improve later]
 
 [sparse_patch.nim]: #hdr-sparse_patch.nim
+[Known limitations and things to improve later]:
+  #hdr-known_limitations_and_things_to_improve_later
 
 
 Alternative repository URLs:
@@ -263,16 +265,6 @@ possibility of destroying filesystem on the receiving end).
 [bittorrent]: https://en.wikipedia.org/wiki/BitTorrent
 
 
-<a name=hdr-known_limitations_to_address_sometime_later_></a><a name=user-content-hdr-known_limitations_to_address_sometime_later_></a>
-### Known limitations, to address sometime later:
-
-- Works in a simple sequential single-threaded way, which will easily bottleneck
-    on CPU for computing hashes when using >200 MiB/s SSD/NVMe drives.
-
-    Can be improved rather easily by putting a fixed-size thread-pool between
-    sequential reader/writer parts, which will hash/match read data buffers in parallel.
-
-
 
 <a name=hdr-more_technical_and_usage_info></a><a name=user-content-hdr-more_technical_and_usage_info></a>
 ## More technical and usage info
@@ -391,3 +383,16 @@ destination, never dropped like that.
 [linux-3.1+ lseek() SEEK_DATA/SEEK_HOLE flags]:
   https://man.archlinux.org/man/lseek.2#Seeking_file_data_and_holes
 [coreutls]: https://www.gnu.org/software/coreutils/
+
+
+
+<a name=hdr-known_limitations_and_things_to_improve_later></a><a name=user-content-hdr-known_limitations_and_things_to_improve_later></a>
+## Known limitations and things to improve later
+
+- Works in a simple sequential single-threaded way, which will easily bottleneck
+    on CPU for computing hashes when using >200 MiB/s SSD/NVMe drives.
+
+    Can be improved rather easily by putting a fixed-size thread-pool between
+    sequential reader/writer parts, which will hash/match read data buffers in parallel.
+
+- Use truncated BLAKE2b instead of BLAKE2s version for new hashmap files, should be ~2x faster.
