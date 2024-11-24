@@ -84,7 +84,7 @@ proc main_help(err="") =
 			## ...and so on - block devices or sparse files can also be used here
 
 		Hash-map file in this example is generated/updated as /mnt/usb-hdd/vm.img.bak{IDCAS_HM_EXT}
-		Hash function used in hash-map-file is always 32B BLAKE2s from OpenSSL.
+		Hash function used in hash-map-file is always 32B BLAKE2b from OpenSSL.
 
 		Arguments and options (in "{app} [options] [src-file] dst-file" command):
 
@@ -350,17 +350,13 @@ proc main(argv: seq[string]) =
 
 	template hash_same(s1, s2: byte): bool =
 		cmpMem(s1.addr, s2.addr, bh_md_len) == 0
-	template hash_block_op(src, src_len, dst) =
+	template hash_block(src: byte, src_len: int, dst: byte) =
 		if not (
 			EVP_DigestInit_ex2(bh_ctx, bh_md, bh_md_params) == 1'i32 and
 			EVP_DigestUpdate(bh_ctx, src.addr, src_len.cint) == 1'i32 and
 			EVP_DigestFinal_ex(bh_ctx, dst.addr, bh_len.addr) == 1'i32 and
 			bh_len == bh_md_len.cint ): err_quit "block-hash failed"
-	template hash_block(src: byte, src_len: int, dst: byte) =
-		hash_block_op(src, src_len, dst)
-		while true: # hm_blk_zero (all-zeroes) is not used as a valid hash
-			if not hash_same(dst, hm_blk_zero[0]): break
-			hash_block_op(dst, bh_len, dst)
+		if hash_same(dst, hm_blk_zero[0]): dst = 0x80
 
 	template lb_buff_read(sz: int, offset: int, bs: int) =
 		sz = src.readBytes(lb_buff, offset, bs)
