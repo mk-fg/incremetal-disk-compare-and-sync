@@ -7,9 +7,7 @@
 import std/[ strformat, strutils, parseopt, os, posix, re ]
 
 
-{.passl: "-lcrypto"}
-
-const IDCAS_MAGIC {.strdefine.} = "idcas-hash-map-1"
+const IDCAS_MAGIC {.strdefine.} = "idcas-hash-map-2"
 const IDCAS_HM_EXT {.strdefine.} = ".idcas" # default hashmap-file suffix
 const IDCAS_LBS {.intdefine.} = 4161536 # <4M - large blocks to check for initial mismatches
 const IDCAS_SBS {.intdefine.} = 32768 # 32K - blocks to compare/copy on LBS mismatch
@@ -19,22 +17,34 @@ when IDCAS_LBS <= IDCAS_SBS or IDCAS_LBS %% IDCAS_SBS != 0:
 	{.emit: "#error Compiled-in LB/SB size values mismatch - LBS must be larger and divisible by SBS".}
 
 
-type EVP_MD = distinct pointer
-proc EVP_blake2s256: EVP_MD {.importc, header: "<openssl/evp.h>".}
-proc EVP_Digest(
-	data: pointer, data_len: cint, digest: pointer, digest_len: ptr cint,
-	md: EVP_MD, engine: pointer ): cint {.importc, header: "<openssl/evp.h>".}
+{.passl: "-lcrypto"}
 
-proc EVP_blake2b512: EVP_MD {.importc, header: "<openssl/evp.h>".}
-type EVP_MD_CTX = distinct pointer
+type
+	EVP_MD = distinct pointer
+	EVP_MD_CTX = distinct pointer
+	OSSL_PARAM = distinct pointer
+
+proc EVP_MD_fetch( lib_ctx: pointer,
+	algo: cstring, params: cstring ): EVP_MD {.importc, header: "<openssl/evp.h>".}
 proc EVP_MD_CTX_new: EVP_MD_CTX {.importc, header: "<openssl/evp.h>".}
 proc EVP_MD_CTX_free(md_ctx: EVP_MD_CTX) {.importc, header: "<openssl/evp.h>".}
-proc EVP_DigestInit(
-	md_ctx: EVP_MD_CTX, md: EVP_MD ): cint {.importc, header: "<openssl/evp.h>".}
+proc EVP_DigestInit( md_ctx: EVP_MD_CTX,
+	md: EVP_MD ): cint {.importc, header: "<openssl/evp.h>".}
+proc EVP_DigestInit_ex2( md_ctx: EVP_MD_CTX,
+	md: EVP_MD, params: OSSL_PARAM ): cint {.importc, header: "<openssl/evp.h>".}
 proc EVP_DigestUpdate( md_ctx: EVP_MD_CTX,
 	data: pointer, data_len: cint ): cint {.importc, header: "<openssl/evp.h>".}
-proc EVP_DigestFinal( md_ctx: EVP_MD_CTX,
+proc EVP_DigestFinal_ex( md_ctx: EVP_MD_CTX,
 	digest: pointer, digest_len: ptr cint ): cint {.importc, header: "<openssl/evp.h>".}
+
+{.emit:"""
+#include <openssl/params.h>
+const size_t BLAKE2B_256BIT_LEN = 32;
+const OSSL_PARAM BLAKE2B_256BIT[] = {
+	OSSL_PARAM_size_t("size", &BLAKE2B_256BIT_LEN), OSSL_PARAM_END };""".}
+let
+	BLAKE2B = EVP_MD_fetch(nil, "BLAKE2B-512", nil)
+	BLAKE2B_256BIT {.importc, nodecl.}: OSSL_PARAM
 
 
 proc sz(v: int|int64): string =
@@ -256,10 +266,11 @@ proc main(argv: seq[string]) =
 		lb_pos: int64 = 0
 		dst_pos: int64 = -1
 
-		bh_len: cint
-		bh_res: cint
-		bh_md = EVP_blake2s256()
+		bh_md = BLAKE2B
+		bh_md_params = BLAKE2B_256BIT
 		bh_md_len = 32
+		bh_len: cint
+		bh_ctx = EVP_MD_CTX_new()
 
 		hm_bs: int
 		hm_sbc = int(opt_lbs / opt_sbs)
@@ -274,7 +285,7 @@ proc main(argv: seq[string]) =
 		hdr_len = hdr_magic.len + 11
 		hdr_pad = newSeq[byte](hm_pos - hdr_len) # block alignment, if works with hm_len/fs
 
-		hash_md = EVP_blake2b512()
+		hash_md = BLAKE2B
 		hash_md_len = 64
 		hash_hm: EVP_MD_CTX
 		hash_file: EVP_MD_CTX
@@ -288,17 +299,15 @@ proc main(argv: seq[string]) =
 
 	template hash_init(ctx: EVP_MD_CTX) =
 		ctx = EVP_MD_CTX_new()
-		bh_res = EVP_DigestInit(ctx, hash_md)
-		if bh_res != 1'i32: err_quit "hash init failed"
+		if EVP_DigestInit(ctx, hash_md) != 1'i32: err_quit "hash init failed"
 	template hash_update(ctx: EVP_MD_CTX, buff: seq[byte], bs=0) =
-		bh_res = EVP_DigestUpdate(
-			ctx, buff[0].addr, cint(if bs != 0: bs else: buff.len) )
-		if bh_res != 1'i32: err_quit "hash update failed"
+		if EVP_DigestUpdate(
+				ctx, buff[0].addr, cint(if bs != 0: bs else: buff.len) ) != 1'i32:
+			err_quit "hash update failed"
 	proc hash_finalize(ctx: EVP_MD_CTX): string =
 		result = newString(hash_md_len)
-		bh_res = EVP_DigestFinal(ctx, result[0].addr, bh_len.addr)
-		if bh_res != 1'i32 or bh_len != hash_md_len.cint:
-			err_quit "hash finalize failed"
+		if EVP_DigestFinal_ex(ctx, result[0].addr, bh_len.addr) != 1'i32 or
+			bh_len != hash_md_len.cint: err_quit "hash finalize failed"
 		EVP_MD_CTX_free(ctx)
 	if opt_hm_hash: hash_init(hash_hm)
 	if opt_file_hash: hash_init(hash_file)
@@ -341,14 +350,17 @@ proc main(argv: seq[string]) =
 
 	template hash_same(s1, s2: byte): bool =
 		cmpMem(s1.addr, s2.addr, bh_md_len) == 0
-
+	template hash_block_op(src, src_len, dst) =
+		if not (
+			EVP_DigestInit_ex2(bh_ctx, bh_md, bh_md_params) == 1'i32 and
+			EVP_DigestUpdate(bh_ctx, src.addr, src_len.cint) == 1'i32 and
+			EVP_DigestFinal_ex(bh_ctx, dst.addr, bh_len.addr) == 1'i32 and
+			bh_len == bh_md_len.cint ): err_quit "block-hash failed"
 	template hash_block(src: byte, src_len: int, dst: byte) =
-		bh_res = EVP_Digest(src.addr, src_len.cint, dst.addr, bh_len.addr, bh_md, nil)
-		if bh_res != 1'i32 or bh_len != bh_md_len.cint: err_quit "hash-op failed"
+		hash_block_op(src, src_len, dst)
 		while true: # hm_blk_zero (all-zeroes) is not used as a valid hash
 			if not hash_same(dst, hm_blk_zero[0]): break
-			bh_res = EVP_Digest(dst.addr, bh_len, dst.addr, bh_len.addr, bh_md, nil)
-			if bh_res != 1'i32 or bh_len != bh_md_len.cint: err_quit "hash-op failed"
+			hash_block_op(dst, bh_len, dst)
 
 	template lb_buff_read(sz: int, offset: int, bs: int) =
 		sz = src.readBytes(lb_buff, offset, bs)

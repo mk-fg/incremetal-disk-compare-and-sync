@@ -279,11 +279,11 @@ Whole operation is broken into following steps:
 
 - For each such block, corresponding hash-map-file block is read (4 KiB by default).
 
-- First 32B [BLAKE2s] hash in hash-block is for LB, and it's checked to see if whole
+- First 32B [BLAKE2b] hash in hash-block is for LB, and it's checked to see if whole
     LB can be skipped, in which case it's back to step-1 with next LB until file ends.
 
 - Rest of the (4K by default) hash-map block is composed of small-block hashes -
-    SBs, 32K bytes by default, with same 32B BLAKE2s hash for each - which are
+    SBs, 32K bytes by default, with same 32B BLAKE2b hash for each - which are
     checked against these SBs in order, detecting ones that changed and writing
     those out to destination at the same offset(s) as in source.
 
@@ -335,7 +335,7 @@ by such scripts.
 
 Hash-map file format is not tied to current host's C type sizes or endianness.
 
-[BLAKE2s]: https://en.wikipedia.org/wiki/BLAKE_(hash_function)
+[BLAKE2b]: https://en.wikipedia.org/wiki/BLAKE_(hash_function)
 
 
 
@@ -394,5 +394,3 @@ destination, never dropped like that.
 
     Can be improved rather easily by putting a fixed-size thread-pool between
     sequential reader/writer parts, which will hash/match read data buffers in parallel.
-
-- Use truncated BLAKE2b instead of BLAKE2s version for new hashmap files, should be ~2x faster.
