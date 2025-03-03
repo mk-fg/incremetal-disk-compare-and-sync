@@ -178,8 +178,9 @@ in-place alongside destination, and does not do anything more fancy than that.
     (some other copy/snapshot maybe).
 
 For most other uses, aforementioned [rdiff] and [rsync] tools might be good enough
-(see rsync's --partial, --inplace and --append-verify opts in particular) -
-make sure to look at those first.
+(see rsync's `--partial`, `--inplace` and `--append-verify` opts in particular,
+as well as `--copy-devices`/`--write-devices` for block devices) - make sure to
+look at those first.
 
 [btrfs]: https://btrfs.readthedocs.io/en/latest/
 [zfs]: https://zfsonlinux.org/
@@ -394,3 +395,6 @@ destination, never dropped like that.
 
     Can be improved rather easily by putting a fixed-size thread-pool between
     sequential reader/writer parts, which will hash/match read data buffers in parallel.
+
+- It'd be nice to discard sequential all-NUL blocks in output - make file sparse
+    instead of writing those out needlessly.
