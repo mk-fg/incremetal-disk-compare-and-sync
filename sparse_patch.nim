@@ -1,7 +1,7 @@
 #? replace(sub = "\t", by = "  ")
 #
 # Debug build/run: nim c -w=on --hints=on -r sparse_patch.nim -h
-# Final build: nim c -d:release --opt:size sparse_patch.nim && strip sparse_patch
+# Final build: nim c -d:release -d:strip -d:lto_incremental --opt:size sparse_patch.nim
 # Usage info: ./sparse_patch -h
 
 import std/[ parseopt, os, posix, strformat, strutils, re ]

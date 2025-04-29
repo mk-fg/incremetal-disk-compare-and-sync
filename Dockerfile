@@ -11,11 +11,11 @@ RUN apk add --no-cache gcc nim \
 	musl-dev libc-dev openssl-dev openssl-libs-static pcre-dev
 
 COPY idcas.nim .
-RUN nim c -d:release --opt:speed -o:idcas.musl idcas.nim \
-	&& strip idcas.musl && ./idcas.musl --help >/dev/null
-RUN nim c -d:release --opt:speed --passL:-static \
+RUN nim c -d:release -d:strip -d:lto_incremental --opt:speed -o:idcas.musl idcas.nim \
+	&& ./idcas.musl --help >/dev/null
+RUN nim c -d:release -d:strip -d:lto_incremental --opt:speed --passL:-static \
 		-d:usePcreHeader --passL:/usr/lib/libpcre.a -o:idcas.static idcas.nim \
-	&& strip idcas.static && ./idcas.static --help >/dev/null
+	&& ./idcas.static --help >/dev/null
 
 FROM scratch as artifact
 COPY --from=build /build/idcas.musl /build/idcas.static /

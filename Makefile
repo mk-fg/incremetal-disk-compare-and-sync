@@ -1,8 +1,7 @@
 all: idcas
 
 %: %.nim
-	nim c -d:release --opt:speed $<
-	strip $@
+	nim c -d:release -d:strip -d:lto_incremental --opt:speed $<
 
 clean:
 	rm -f idcas sparse_patch

@@ -1,7 +1,7 @@
 #? replace(sub = "\t", by = "  ")
 #
 # Debug build/run: nim c -w=on --hints=on -r idcas.nim -h
-# Final build: nim c -d:release --opt:speed idcas.nim && strip idcas
+# Final build: nim c -d:release -d:strip -d:lto_incremental --opt:speed idcas.nim
 # Usage info: ./idcas -h
 
 import std/[ strformat, strutils, parseopt, os, posix, re ]

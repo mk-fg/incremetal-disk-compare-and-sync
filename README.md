@@ -41,7 +41,7 @@ Alternative repository URLs:
 This tool is written in [Nim] C-adjacent language, linked against [OpenSSL] (libcrypto).
 
 Build with the usual "make": `make`\
-... or alternatively: `nim c -d:release --opt:speed idcas.nim && strip idcas`\
+... or alternatively: `nim c -d:release -d:strip -d:lto_incremental --opt:speed idcas.nim`\
 Smoke-test and usage info: `./idcas -h`
 
 Installation: copy resulting binary to anywhere you can/intend-to run it from.
@@ -203,12 +203,12 @@ look at those first.
     functionality for that, but if it's not an option, following process should
     avoid any such potential issues:
 
-    - Before sync, copy current hash-map-file to e.g. ``hash-map-file.new``.
+    - Before sync, copy current hash-map-file to e.g. `hash-map-file.new`.
 
-    - Run the tool with ``--hash-map hash-map-file.new``, updating that and dst-file.
+    - Run the tool with `--hash-map hash-map-file.new`, updating that and dst-file.
 
-    - After completion, run ``sync`` or such to flush pending writes to disk,
-        and rename ``hash-map-file.new`` to persistent place after that,
+    - After completion, run `sync` or such to flush pending writes to disk,
+        and rename `hash-map-file.new` to persistent place after that,
         atomically replacing earlier file.
 
     Interruption/restart during this will at worst redo some copying using same old hash-map.
@@ -223,7 +223,7 @@ look at those first.
 
 - Network transmission/protocols or related optimizations.
 
-    It's possible to ``rsync -S`` a sparse file delta, or use path on a network
+    It's possible to `rsync -S` a sparse file delta, or use path on a network
     filesystem as a sync destination, but there's nothing beyond that.
 
 - Compression - nothing is compressed/decompressed by the tool itself.
@@ -356,7 +356,7 @@ It uses [linux-3.1+ lseek() SEEK_DATA/SEEK_HOLE flags] for skipping over
 unmapped chunks efficiently, without mapping all blocks or extents via older
 ioctl() APIs, and is a very simple "seek/read/write loop" for this one task.
 
-Can be built with: `nim c -d:release --opt:size sparse_patch.nim && strip sparse_patch`\
+Can be built with: `nim c -d:release -d:strip -d:lto_incremental --opt:size sparse_patch.nim`\
 Usage info: `./sparse_patch -h`
 
 Especially if using custom block sizes (e.g. smaller than default 4096), make
@@ -376,7 +376,7 @@ is meaningfully sparse, and whether destination one is kept sparse is irrelevant
 For example, modern cp tool from [coreutls] can use SEEK_HOLE logic as well
 (if built with support for it, otherwise silently falls back to zero-byte-detection),
 but is also documented to "create a sparse DEST file whenever the SOURCE file
-contains a long enough sequence of zero bytes" when using ``--sparse`` option,
+contains a long enough sequence of zero bytes" when using `--sparse` option,
 which is distinct from only copying non-sparse extents from source - zero-bytes
 can be in a legitimate non-sparse source data too, and should be written to
 destination, never dropped like that.
