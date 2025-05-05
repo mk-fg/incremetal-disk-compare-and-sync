@@ -61,9 +61,7 @@ proc main_help(err="") =
 	let app = getAppFilename().lastPathPart
 	if err != "": print &"ERROR: {err}"
 	print &"\nUsage: {app} [options] [src-file] dst-file"
-	if err != "":
-		print &"Run '{app} --help' for more information"
-		quit 0
+	if err != "": print &"Run '{app} --help' for more information"; quit 1
 	print dedent(&"""
 
 		Incremetal Disk (or VM-image/big-file) Compare And Sync tool (idcas).

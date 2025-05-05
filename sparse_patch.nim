@@ -27,9 +27,7 @@ proc main_help(err="") =
 	let app = getAppFilename().lastPathPart
 	if err != "": print &"ERROR: {err}"
 	print &"\nUsage: {app} [opts] src-sparse-file dest-file"
-	if err != "":
-		print &"Run '{app} --help' for more information"
-		quit 0
+	if err != "": print &"Run '{app} --help' for more information"; quit 1
 	print dedent(&"""
 
 		Tool to efficiently copy non-sparse regions from src to dst file.
