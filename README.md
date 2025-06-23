@@ -35,7 +35,7 @@ Alternative repository URLs:
 
 
 
-<a name=hdr-build_and_usage></a><a name=user-content-hdr-build_and_usage></a>
+<a name=hdr-build_and_usage></a>
 ## Build and usage
 
 This tool is written in [Nim] C-adjacent language, linked against [OpenSSL] (libcrypto).
@@ -101,7 +101,7 @@ fuse-filesystem (for `--skip-read-errors` option).
 
 
 
-<a name=hdr-description></a><a name=user-content-hdr-description></a>
+<a name=hdr-description></a>
 ## Description
 
 This tool always reads over all data in the source arg sequentially in a single pass,
@@ -135,7 +135,7 @@ in-place alongside destination, and does not do anything more fancy than that.
 [rdiff]: https://librsync.github.io/page_rdiff.html
 
 
-<a name=hdr-intended_use-cases_include_></a><a name=user-content-hdr-intended_use-cases_include_></a>
+<a name=hdr-intended_use-cases_include_></a>
 ### Intended use-cases include:
 
 - Synchronizing two devices (or VM-images, any large files) with as little
@@ -188,7 +188,7 @@ look at those first.
 [ddrescue]: https://www.gnu.org/software/ddrescue/ddrescue.html
 
 
-<a name=hdr-non-goals_for_this_tool_></a><a name=user-content-hdr-non-goals_for_this_tool_></a>
+<a name=hdr-non-goals_for_this_tool_></a>
 ### Non-goals for this tool:
 
 - Deduplication within files and between chunks of files at different offsets.
@@ -267,7 +267,7 @@ possibility of destroying filesystem on the receiving end).
 
 
 
-<a name=hdr-more_technical_and_usage_info></a><a name=user-content-hdr-more_technical_and_usage_info></a>
+<a name=hdr-more_technical_and_usage_info></a>
 ## More technical and usage info
 
 Whole operation is broken into following steps:
@@ -340,7 +340,7 @@ Hash-map file format is not tied to current host's C type sizes or endianness.
 
 
 
-<a name=hdr-sparse_patch.nim></a><a name=user-content-hdr-sparse_patch.nim></a>
+<a name=hdr-sparse_patch.nim></a>
 ## sparse_patch.nim
 
 When using a non-existant (or sparse) destination file with pre-existing
@@ -387,7 +387,7 @@ destination, never dropped like that.
 
 
 
-<a name=hdr-known_limitations_and_things_to_improve_later></a><a name=user-content-hdr-known_limitations_and_things_to_improve_later></a>
+<a name=hdr-known_limitations_and_things_to_improve_later></a>
 ## Known limitations and things to improve later
 
 - Works in a simple sequential single-threaded way, which will easily bottleneck
