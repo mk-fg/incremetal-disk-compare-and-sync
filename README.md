@@ -53,17 +53,17 @@ Usage example:
 # Same thing as "cp" does, but also auto-generates hash-map-file (vm.img.idcas)
 % idcas vm.img /mnt/usb-hdd/vm.img.bak
 
-## ...VM runs and stuff changes in vm.img after this...
-
-# Fancy: make date/time-suffixed btrfs/zfs copy-on-write snapshot of vm.img backup
+# Fancy: make date/time-suffixed xfs/btrfs/zfs copy-on-write snapshot of vm.img backup
 % cp --reflink /mnt/usb-hdd/vm.img.bak{,.$(date -Is)}
+
+## ...VM runs and stuff changes in vm.img after this...
 
 # Efficiently update vm.img.bak file, overwriting only changed blocks in-place
 % idcas -v vm.img /mnt/usb-hdd/vm.img.bak
 Stats: 50 GiB file + 50.0 MiB hash-map ::
   12_800 LBs, 7 updated :: 889 SBs compared, 19 copied :: 608 KiB written
 
-# Repeat right after that - vm.img checked against hash-map, but nothing to update
+# Repeat right after that - vm.img checked against hash-map, with nothing to update
 % idcas -v vm.img /mnt/usb-hdd/vm.img.bak
 Stats: 50 GiB file + 50.0 MiB hash-map ::
   12_800 LBs, 0 updated :: 0 SBs compared, 0 copied :: 0 B written
@@ -242,6 +242,11 @@ look at those first.
 
     That's more into [zsync] and [bittorrent] territory, i.e. file-sharing tools.
 
+- Runtime "hot spare" synchronization - always scans through full source file/dev,
+    so not really efficient for that.
+
+    Look at [foxing] (aka xfs-mirror) tool or btfs/zfs replication instead.
+
 - Any kind of permissions and file metadata - only file contents are synchronized.
 
 It is also **not** a good replacement for [btrfs]/[zfs] send/recv replication
@@ -254,8 +259,8 @@ tiny or non-existant.
 Which is (partly) why they have much more efficient fs-level incremental
 replication built into them - it should be a much better option than a "dumb"
 block-level replication of underlying storage for those, aside from potential
-issues with copying fs corruption or security implications (i.e. allows for
-possibility of destroying filesystem on the receiving end).
+issues with copying fs bugs or maybe security implications of those (if there
+isn't strong enough security boundary around checking/copying fs internals).
 
 [casync]: https://github.com/systemd/casync
 [bup]: https://bup.github.io/
@@ -264,6 +269,7 @@ possibility of destroying filesystem on the receiving end).
 [xdelta3]: http://xdelta.org/
 [zsync]: http://zsync.moria.org.uk/
 [bittorrent]: https://en.wikipedia.org/wiki/BitTorrent
+[foxing]: https://codeberg.org/aenertia/foxing
 
 
 
@@ -401,10 +407,16 @@ destination, never dropped like that.
 ## Known limitations and things to improve later
 
 - Works in a simple sequential single-threaded way, which can bottleneck
-    on CPU for computing hashes when using >400 MiB/s SSD/NVMe drives.
+    on CPU for computing hashes or I/O latency when using fast SSD/NVMe drives.
 
     Can be improved rather easily by putting a fixed-size thread-pool between
     sequential reader/writer parts, which will hash/match read data buffers in parallel.
 
 - It'd be nice to discard sequential all-NUL blocks in output - make file sparse
     instead of writing those out needlessly.
+
+- Hashing algorithm agility/transition can be supported by storing algo in
+    hash-map header, using it to check blocks while reading, and update them all
+    to new hash after that, but seems like more trouble than it's worth - can also
+    just check old/existing hash-map and generate new one from dst file before
+    sync with new hash.
