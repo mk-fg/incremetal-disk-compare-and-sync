@@ -7,12 +7,14 @@
 import std/[ strformat, strutils, parseopt, os, posix, re ]
 
 
-const IDCAS_MAGIC {.strdefine.} = "idcas-hash-map-2"
+const IDCAS_MAGIC {.strdefine.} = "idcas-hash-map-3"
 const IDCAS_HM_EXT {.strdefine.} = ".idcas" # default hashmap-file suffix
-const IDCAS_HM_BLAKE2 {.booldefine.} = false # to use blake2b instead of sha256
 const IDCAS_LBS {.intdefine.} = 4161536 # <4M - large blocks to check for initial mismatches
 const IDCAS_SBS {.intdefine.} = 32768 # 32K - blocks to compare/copy on LBS mismatch
 # hash-map-file block = 32B lb-hash + 32B * (lbs / sbs) = neat 4K (w/ sbs=32K lbs=127*32K)
+
+const IDCAS_BLAKE2 {.booldefine.} = false # to use blake2b instead of sha256
+const IDCAS_BLAKE2_MAGIC {.strdefine.} = "idcas-hash-map-2" # compat with older files
 
 when IDCAS_LBS <= IDCAS_SBS or IDCAS_LBS %% IDCAS_SBS != 0:
 	{.emit: "#error Compiled-in LB/SB size values mismatch - LBS must be larger and divisible by SBS".}
@@ -62,8 +64,8 @@ proc main_help(err="") =
 		write(dst, s); write(dst, "\n")
 	let
 		app = getAppFilename().lastPathPart
-		hash_alg = if not IDCAS_HM_BLAKE2: "SHA256" else: "BLAKE2b"
-		hash_tool = if not IDCAS_HM_BLAKE2: "sha256sum" else: "b2sum"
+		hash_alg = if not IDCAS_BLAKE2: "SHA256" else: "BLAKE2b"
+		hash_tool = if not IDCAS_BLAKE2: "sha256sum" else: "b2sum"
 	if err != "": print &"ERROR: {err}"
 	print &"\nUsage: {app} [options] [src-file] dst-file"
 	if err != "": print &"Run '{app} --help' for more information"; quit 1
@@ -159,7 +161,7 @@ proc main_help(err="") =
 			-H/--hash-algo <sha256/blake2b>
 				Hashing algorithm used for processing blocks and --print-*-hash options.
 				SHA256 is 2x faster on recent x86/ARM with hw-accel, BLAKE2b is 2x faster otherwise.
-				Default: {hash_alg.to_lower_ascii} (controlled by build-time IDCAS_HM_BLAKE2 option)
+				Default: {hash_alg.to_lower_ascii} (controlled by build-time IDCAS_BLAKE2 option)
 		""")
 	quit 0
 
@@ -177,8 +179,8 @@ proc main(argv: seq[string]) =
 		opt_hm_hash = false
 		opt_file_hash = false
 		opt_skip_errs = false
-		opt_hm_algo_set = ""
-		opt_hm_blake2b = IDCAS_HM_BLAKE2
+		opt_hash_set = ""
+		opt_hash_blake2 = IDCAS_BLAKE2
 
 	block cli_parser:
 		var opt_last = ""
@@ -191,7 +193,7 @@ proc main(argv: seq[string]) =
 			if k in ["m", "hash-map"]: opt_hm_file = v
 			elif k in ["B", "block-large"]: opt_lbs = v.parse_int
 			elif k in ["b", "block-small"]: opt_sbs = v.parse_int
-			elif k in ["H", "hash-algo"]: opt_hm_algo_set = v.to_lower_ascii
+			elif k in ["H", "hash-algo"]: opt_hash_set = v.to_lower_ascii
 			else: main_help &"Unrecognized option [ {opt_fmt(k)} = {v} ]"
 
 		for t, opt, val in getopt(argv):
@@ -228,10 +230,10 @@ proc main(argv: seq[string]) =
 		if opt_skip_errs and opt_lbs / opt_sbs >= 65536:
 			# This is due to using set[unit16] nim bit-vector, where uint16 is the limit
 			err_quit "--skip-read-errors option doesn't allow lbs / sbs >= 2^16"
-		if opt_hm_algo_set notin ["", "sha256", "blake2b"]:
-			err_quit &"Unsupported -H/--hash-algo [ {opt_hm_algo_set} ] - only sha256/blake2b"
-		elif opt_hm_algo_set == "blake2b": opt_hm_blake2b = true
-		elif opt_hm_algo_set == "sha256": opt_hm_blake2b = false
+		if opt_hash_set notin ["", "sha256", "blake2b"]:
+			err_quit &"Unsupported -H/--hash-algo [ {opt_hash_set} ] - only sha256/blake2b"
+		elif opt_hash_set == "blake2b": opt_hash_blake2 = true
+		elif opt_hash_set == "sha256": opt_hash_blake2 = false
 
 
 	### Open hash-map / source / destination files
@@ -315,7 +317,8 @@ proc main(argv: seq[string]) =
 		st_sb_upd = 0
 		st_sb_err = 0
 
-	if opt_hm_blake2b:
+	if opt_hash_blake2:
+		hdr_magic = IDCAS_BLAKE2_MAGIC
 		bh_md = BLAKE2B
 		bh_md_params = BLAKE2B_256BIT
 		hash_md = BLAKE2B

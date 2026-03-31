@@ -3,13 +3,13 @@ set -eEo pipefail
 umask 077
 trap 'echo >&2 "----- FAILURE at line $LINENO :: $BASH_COMMAND"' ERR
 
-## Use IDCAS_HM_BLAKE2=1 (same name as -d:... option) env-var for blake2 mode
-[[ -n "$IDCAS_HM_BLAKE2" ]] && b2=1 || b2=
+## Use IDCAS_BLAKE2=1 (same name as -d:... option) env-var for blake2 mode
+[[ -n "$IDCAS_BLAKE2" ]] && b2=1 || b2=
 
 
 ## Auto-build/update binaries, if old or missing
 nim='nim c --verbosity:0 --threads:off -d:release -d:strip -d:lto_incremental --opt:speed'
-[[ -z "$b2" ]] || nim+=' -d:IDCAS_HM_BLAKE2'
+[[ -z "$b2" ]] || nim+=' -d:IDCAS_BLAKE2'
 [[ -e idcas.nim ]] || { p=$(realpath "$0"); cd "${p%/*}"; }
 [[ -e idcas.nim && -e sparse_patch.nim ]] || {
 	echo >&2 'ERROR: must be run from the repository dir'; exit 1; }

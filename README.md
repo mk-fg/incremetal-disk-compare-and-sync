@@ -344,7 +344,7 @@ Hash-map file format is not tied to current host's C type sizes or endianness.
 
 Default hash that is used for everything is currently SHA256, due to hardware
 acceleration on modern x86/ARM CPUs.
-Compile-time `-d:IDCAS_HM_BLAKE2` or runtime `-H/--hash-algo` option can select
+Compile-time `-d:IDCAS_BLAKE2` or runtime `-H/--hash-algo` option can select
 [BLAKE2b hash] instead (with 32-bit output for hash-map), which has better software
 implementation performance (2x+ over SHA256 on CPUs without hardware support for either),
 and is also available in OpenSSL library.
