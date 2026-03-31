@@ -111,18 +111,6 @@ proc main_help(err="") =
 				Exit with error code and message if -m/--hash-map file does not exist or invalid.
 				This is intended to be used in scripts, where missing file might indicate a bug.
 
-			-B/--block-large <bytes>
-				Block size to store/update and initially compare for performance reasons, in bytes.
-				It must always be a multiple of --block-small sizes, which are
-					actually compared and copied upon hash mismatch in these large blocks.
-				Default: {IDCAS_LBS} ({IDCAS_LBS.sz}, compile-time IDCAS_LBS option)
-
-			-b/--block-small <bytes>
-				Smallest block size to compare and store hash for in hash-map-file.
-				Hashes for these blocks are loaded and compared/updated when
-					large-block hash doesn't match, to find which of those to update.
-				Default: {IDCAS_SBS} bytes ({IDCAS_SBS.sz}, compile-time IDCAS_SBS option)
-
 			-c/--check
 				Check specified dst-file against hash-map-file, without
 					updating it, and exit immediately on any mismatch with non-zero status.
@@ -152,6 +140,26 @@ proc main_help(err="") =
 
 			-v/--verbose
 				Print transfer statistics to stdout before exiting.
+
+		Options that should probably be set once at build-time:
+		Changing these for existing file(s) will cause full hash-map rebuild and/or dst-file overwrite.
+
+			-B/--block-large <bytes>
+				Block size to store/update and initially compare (for performance reasons), in bytes.
+				It must always be a multiple of --block-small sizes, which are
+					actually compared and copied upon hash mismatch in these large blocks.
+				Default: {IDCAS_LBS} ({IDCAS_LBS.sz}, compile-time IDCAS_LBS option)
+
+			-b/--block-small <bytes>
+				Smallest block size to compare and store hash for in hash-map-file.
+				Hashes for these blocks are loaded and compared/updated when
+					large-block hash doesn't match, to find which of those to update.
+				Default: {IDCAS_SBS} bytes ({IDCAS_SBS.sz}, compile-time IDCAS_SBS option)
+
+			-H/--hash-algo <sha256/blake2b>
+				Hashing algorithm used for processing blocks and --print-*-hash options.
+				SHA256 is 2x faster on recent x86/ARM with hw-accel, BLAKE2b is 2x faster otherwise.
+				Default: {hash_alg.to_lower_ascii} (controlled by build-time IDCAS_HM_BLAKE2 option)
 		""")
 	quit 0
 
@@ -169,6 +177,8 @@ proc main(argv: seq[string]) =
 		opt_hm_hash = false
 		opt_file_hash = false
 		opt_skip_errs = false
+		opt_hm_algo_set = ""
+		opt_hm_blake2b = IDCAS_HM_BLAKE2
 
 	block cli_parser:
 		var opt_last = ""
@@ -179,8 +189,9 @@ proc main(argv: seq[string]) =
 			main_help &"{opt_fmt(opt_last)} option unrecognized or requires a value"
 		proc opt_set(k: string, v: string) =
 			if k in ["m", "hash-map"]: opt_hm_file = v
-			elif k in ["B", "block-large"]: opt_lbs = parseInt(v)
-			elif k in ["b", "block-small"]: opt_sbs = parseInt(v)
+			elif k in ["B", "block-large"]: opt_lbs = v.parse_int
+			elif k in ["b", "block-small"]: opt_sbs = v.parse_int
+			elif k in ["H", "hash-algo"]: opt_hm_algo_set = v.to_lower_ascii
 			else: main_help &"Unrecognized option [ {opt_fmt(k)} = {v} ]"
 
 		for t, opt, val in getopt(argv):
@@ -217,6 +228,10 @@ proc main(argv: seq[string]) =
 		if opt_skip_errs and opt_lbs / opt_sbs >= 65536:
 			# This is due to using set[unit16] nim bit-vector, where uint16 is the limit
 			err_quit "--skip-read-errors option doesn't allow lbs / sbs >= 2^16"
+		if opt_hm_algo_set notin ["", "sha256", "blake2b"]:
+			err_quit &"Unsupported -H/--hash-algo [ {opt_hm_algo_set} ] - only sha256/blake2b"
+		elif opt_hm_algo_set == "blake2b": opt_hm_blake2b = true
+		elif opt_hm_algo_set == "sha256": opt_hm_blake2b = false
 
 
 	### Open hash-map / source / destination files
@@ -300,7 +315,7 @@ proc main(argv: seq[string]) =
 		st_sb_upd = 0
 		st_sb_err = 0
 
-	if IDCAS_HM_BLAKE2:
+	if opt_hm_blake2b:
 		bh_md = BLAKE2B
 		bh_md_params = BLAKE2B_256BIT
 		hash_md = BLAKE2B

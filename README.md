@@ -343,14 +343,15 @@ by such scripts.
 Hash-map file format is not tied to current host's C type sizes or endianness.
 
 Default hash that is used for everything is currently SHA256, due to hardware
-acceleration on modern x86/ARM CPUs. Compile-time `-d:IDCAS_HM_BLAKE2` option
-can be added to use [BLAKE2b hash] instead (with 32-bit output for hash-map),
-which has better software implementation performance (2x+ over SHA256 on CPUs
-without hardware support for either), and is also available in OpenSSL library.
+acceleration on modern x86/ARM CPUs.
+Compile-time `-d:IDCAS_HM_BLAKE2` or runtime `-H/--hash-algo` option can select
+[BLAKE2b hash] instead (with 32-bit output for hash-map), which has better software
+implementation performance (2x+ over SHA256 on CPUs without hardware support for either),
+and is also available in OpenSSL library.
 
 Command-line "openssl" tool can be used to compare hashing algorithms' performance:
 
-    for a in sha256 blake2b512; do openssl speed -bytes 4096 -evp $a | tail -1 ; done
+    for a in sha256 blake2b512; do openssl speed -bytes 32768 -evp $a | tail -1; done
 
 [BLAKE2b hash]: https://en.wikipedia.org/wiki/BLAKE_(hash_function)
 
