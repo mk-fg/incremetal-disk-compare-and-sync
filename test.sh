@@ -3,22 +3,25 @@ set -eEo pipefail
 umask 077
 trap 'echo >&2 "----- FAILURE at line $LINENO :: $BASH_COMMAND"' ERR
 
+## Use IDCAS_HM_BLAKE2=1 (same name as -d:... option) env-var for blake2 mode
+[[ -n "$IDCAS_HM_BLAKE2" ]] && b2=1 || b2=
+
 
 ## Auto-build/update binaries, if old or missing
-nim='nim c --verbosity:0 -d:release --opt:speed'
-
+nim='nim c --verbosity:0 --threads:off -d:release -d:strip -d:lto_incremental --opt:speed'
+[[ -z "$b2" ]] || nim+=' -d:IDCAS_HM_BLAKE2'
 [[ -e idcas.nim ]] || { p=$(realpath "$0"); cd "${p%/*}"; }
 [[ -e idcas.nim && -e sparse_patch.nim ]] || {
 	echo >&2 'ERROR: must be run from the repository dir'; exit 1; }
 [[ idcas -nt idcas.nim ]] || $nim idcas.nim
 idcas=$(readlink -f idcas)
-
 [[ sparse_patch -nt sparse_patch.nim ]] || $nim sparse_patch.nim
 sp=$(readlink -f sparse_patch)
 
-b2sum=$(command -v b2sum)
-[[ -n "$b2sum" ]] || { echo >&2 'ERROR: b2sum command not found'; exit 1; }
-b2chk="$b2sum --quiet -c"
+[[ -z "$b2" ]] && cmd=sha256sum || cmd=b2sum
+ckcmd=$(command -v $cmd)
+[[ -n "$ckcmd" ]] || { echo >&2 "ERROR: $cmd command not found"; exit 1; }
+ckmatch="$ckcmd --quiet -c"
 
 urfs=$(command -v unreliablefs)
 [[ -n "$urfs" ]] || { echo >&2 'ERROR: unreliablefs command not found'; exit 1; }
@@ -90,22 +93,22 @@ $sp -nv test.patch | grep -q "copied $upd_kib KiB"
 $sp -n test.patch test.patch.chk && [[ ! -e test.patch.chk ]]
 truncate -s $(stat -c%s test.patch) test.patch.chk
 $sp test.patch test.patch.chk
-b2=$($b2sum test.patch.chk); $b2chk <<< "${b2%%.chk}"
+b2=$($ckcmd test.patch.chk); $b2chk <<< "${b2%%.chk}"
 [[ $(du -BK test.patch.chk | cut -f1) = $(du -BK test.patch | cut -f1) ]]
 rm -f test.patch.chk
 $sp -v test.patch test.patch.chk >/dev/null
 truncate -s $(stat -c%s test.patch.chk) test.patch
-b2=$($b2sum test.patch.chk); $b2chk <<< "${b2%%.chk}"
+b2=$($ckcmd test.patch.chk); $b2chk <<< "${b2%%.chk}"
 [[ $(du -BK test.patch.chk | cut -f1) = $(du -BK test.patch | cut -f1) ]]
 
 # Test: reverting changes is perfectly symmetrical
 "$idcas" -v -m test.map test.bin.orig test.bin | grep -q "SBs checked, $upd_sbs updated"
-$b2chk <<< "$csum  test.bin"
+$ckmatch <<< "$csum  test.bin"
 
 # Test: reusing old .map works same, still copies blocks, doesn't break anything
 cp -a test.map{.after-dd,}
 "$idcas" -v -m test.map test.bin.orig test.bin | grep -q "SBs checked, $upd_sbs updated"
-$b2chk <<< "$csum  test.bin"
+$ckmatch <<< "$csum  test.bin"
 
 # Randomize /dev/zero blocks for other tests to not match them weirdly
 dd_patch 32K 1 1200 # 37.5M
@@ -133,7 +136,7 @@ trap exit_cleanup EXIT
 mkdir -p urfs urfs.base
 [[ -e urfs.base/test.bin ]] || ln test.bin urfs.base/test.bin
 
-$b2chk <<< "$("$idcas" --print-file-hash -m test.map test.bin)  urfs.base/test.bin"
+$ckmatch <<< "$("$idcas" --print-file-hash -m test.map test.bin)  urfs.base/test.bin"
 mv test.map{,.pure}
 
 # probability=0 seem to be =1%, as in "random(0, 100) <= n"
@@ -172,13 +175,13 @@ if "$idcas" -c -m test.map test.bin.corrupt ; then false - corrupt map not updat
 
 # Test: corrupted blocks get fixed
 cp -a test.bin.{corrupt,fix} && cp -a test.map{.corrupt,}
-$b2chk <<< "$("$idcas" --print-file-hash -m test.map test.bin test.bin.fix)  test.bin"
+$ckmatch <<< "$("$idcas" --print-file-hash -m test.map test.bin test.bin.fix)  test.bin"
 mv test.map{,.fix}
 
 # Test: create sparse patch-file
 rm -f test.patch
 cp -a test.map{.corrupt,}
-$b2chk <<< "$("$idcas" --print-file-hash -m test.map test.bin test.patch)  test.bin"
+$ckmatch <<< "$("$idcas" --print-file-hash -m test.map test.bin test.patch)  test.bin"
 mv test.map{,.bmap}
 [[ $(du -BK test.patch | cut -f1) = 32K ]]
 [[ $(du --apparent-size -BK test.patch | cut -f1) != 32K ]]
@@ -186,10 +189,10 @@ mv test.map{,.bmap}
 # Test: patch fixes unreadable block(s) w/o breaking anything else
 cp -a test.bin{,.chk}
 $sp test.patch test.bin.chk
-b2=$($b2sum test.bin.chk); $b2chk <<< "${b2%%.chk}"
+b2=$($ckcmd test.bin.chk); $ckmatch <<< "${b2%%.chk}"
 cp -a test.bin.{corrupt,chk}
 $sp test.patch test.bin.chk
-b2=$($b2sum test.bin.chk); $b2chk <<< "${b2%%.chk}"
+b2=$($ckcmd test.bin.chk); $ckmatch <<< "${b2%%.chk}"
 
 }
 

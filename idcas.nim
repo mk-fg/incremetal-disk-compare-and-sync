@@ -9,6 +9,7 @@ import std/[ strformat, strutils, parseopt, os, posix, re ]
 
 const IDCAS_MAGIC {.strdefine.} = "idcas-hash-map-2"
 const IDCAS_HM_EXT {.strdefine.} = ".idcas" # default hashmap-file suffix
+const IDCAS_HM_BLAKE2 {.booldefine.} = false # to use blake2b instead of sha256
 const IDCAS_LBS {.intdefine.} = 4161536 # <4M - large blocks to check for initial mismatches
 const IDCAS_SBS {.intdefine.} = 32768 # 32K - blocks to compare/copy on LBS mismatch
 # hash-map-file block = 32B lb-hash + 32B * (lbs / sbs) = neat 4K (w/ sbs=32K lbs=127*32K)
@@ -43,6 +44,7 @@ const size_t BLAKE2B_256BIT_LEN = 32;
 const OSSL_PARAM BLAKE2B_256BIT[] = {
 	OSSL_PARAM_size_t("size", &BLAKE2B_256BIT_LEN), OSSL_PARAM_END };""".}
 let
+	SHA256 = EVP_MD_fetch(nil, "SHA256", nil)
 	BLAKE2B = EVP_MD_fetch(nil, "BLAKE2B-512", nil)
 	BLAKE2B_256BIT {.importc, nodecl.}: OSSL_PARAM
 
@@ -58,7 +60,10 @@ proc main_help(err="") =
 	proc print(s: string) =
 		let dst = if err == "": stdout else: stderr
 		write(dst, s); write(dst, "\n")
-	let app = getAppFilename().lastPathPart
+	let
+		app = getAppFilename().lastPathPart
+		hash_alg = if not IDCAS_HM_BLAKE2: "SHA256" else: "BLAKE2b"
+		hash_tool = if not IDCAS_HM_BLAKE2: "sha256sum" else: "b2sum"
 	if err != "": print &"ERROR: {err}"
 	print &"\nUsage: {app} [options] [src-file] dst-file"
 	if err != "": print &"Run '{app} --help' for more information"; quit 1
@@ -82,7 +87,7 @@ proc main_help(err="") =
 			## ...and so on - block devices or sparse files can also be used here
 
 		Hash-map file in this example is generated/updated as /mnt/usb-hdd/vm.img.bak{IDCAS_HM_EXT}
-		Hash function used in hash-map-file is always 32B BLAKE2b from OpenSSL.
+		Hash function used in hash-map-file is 32B {hash_alg} from OpenSSL.
 
 		Arguments and options (in "{app} [options] [src-file] dst-file" command):
 
@@ -136,12 +141,12 @@ proc main_help(err="") =
 				Default is to abort and exit upon encountering any I/O error.
 
 			--print-hm-hash
-				Print hex-encoded BLAKE2b 512-bit hash line (no key/salt/person) of resulting
-					hash-map file to stdout, matching "b2sum" or "openssl dgst" command outputs for it.
+				Print hex-encoded {hash_alg} hash line (no key/salt/person) of resulting
+					hash-map file to stdout, matching "{hash_tool}" or "openssl dgst" command outputs for it.
 				More efficient than doing it separately, as tool always reads hash-map file anyway.
 
 			--print-file-hash
-				Same as --print-hm-hash, but prints BLAKE2b hash for processed file(s).
+				Same as --print-hm-hash, but prints {hash_alg} hash for processed file(s).
 				Will be calculated from src-file reads, if specified, or dst-file reads otherwise.
 				If both --print-*-hash options are used, this will be second hash line on stdout.
 
@@ -264,8 +269,8 @@ proc main(argv: seq[string]) =
 		lb_pos: int64 = 0
 		dst_pos: int64 = -1
 
-		bh_md = BLAKE2B
-		bh_md_params = BLAKE2B_256BIT
+		bh_md = SHA256
+		bh_md_params: OSSL_PARAM
 		bh_md_len = 32
 		bh_len: cint
 		bh_ctx = EVP_MD_CTX_new()
@@ -283,8 +288,8 @@ proc main(argv: seq[string]) =
 		hdr_len = hdr_magic.len + 11
 		hdr_pad = newSeq[byte](hm_pos - hdr_len) # block alignment, if works with hm_len/fs
 
-		hash_md = BLAKE2B
-		hash_md_len = 64
+		hash_md = SHA256
+		hash_md_len = 32
 		hash_hm: EVP_MD_CTX
 		hash_file: EVP_MD_CTX
 
@@ -294,6 +299,12 @@ proc main(argv: seq[string]) =
 		st_sb_chk = 0
 		st_sb_upd = 0
 		st_sb_err = 0
+
+	if IDCAS_HM_BLAKE2:
+		bh_md = BLAKE2B
+		bh_md_params = BLAKE2B_256BIT
+		hash_md = BLAKE2B
+		hash_md_len = 64
 
 	template hash_init(ctx: EVP_MD_CTX) =
 		ctx = EVP_MD_CTX_new()

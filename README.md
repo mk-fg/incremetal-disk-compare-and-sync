@@ -280,13 +280,13 @@ Whole operation is broken into following steps:
 
 - For each such block, corresponding hash-map-file block is read (4 KiB by default).
 
-- First 32B [BLAKE2b] hash in hash-block is for LB, and it's checked to see if whole
-    LB can be skipped, in which case it's back to step-1 with next LB until file ends.
+- First 32B hash in hash-block is for LB, and it's checked to see if whole LB
+    can be skipped, in which case it's back to step-1 with next LB until file ends.
 
 - Rest of the (4K by default) hash-map block is composed of small-block hashes -
-    SBs, 32K bytes by default, with same 32B BLAKE2b hash for each - which are
-    checked against these SBs in order, detecting ones that changed and writing
-    those out to destination at the same offset(s) as in source.
+    SBs, 32K bytes by default, with same 32B hash for each - which are checked against
+    these SBs in order, detecting ones that changed and writing those out to destination
+    at the same offset(s) as in source.
 
 - hash-map-file (4K) block gets replaced with the one computed from updated src data.
 
@@ -336,7 +336,17 @@ by such scripts.
 
 Hash-map file format is not tied to current host's C type sizes or endianness.
 
-[BLAKE2b]: https://en.wikipedia.org/wiki/BLAKE_(hash_function)
+Default hash that is used for everything is currently SHA256, due to hardware
+acceleration on modern x86/ARM CPUs. Compile-time `-d:IDCAS_HM_BLAKE2` option
+can be added to use [BLAKE2b hash] instead (with 32-bit output for hash-map),
+which has better software implementation performance (2x+ over SHA256 on CPUs
+without hardware support for either), and is also available in OpenSSL library.
+
+Command-line "openssl" tool can be used to compare hashing algorithms' performance:
+
+    for a in sha256 blake2b512; do openssl speed -bytes 4096 -evp $a | tail -1 ; done
+
+[BLAKE2b hash]: https://en.wikipedia.org/wiki/BLAKE_(hash_function)
 
 
 
@@ -390,8 +400,8 @@ destination, never dropped like that.
 <a name=hdr-known_limitations_and_things_to_improve_later></a>
 ## Known limitations and things to improve later
 
-- Works in a simple sequential single-threaded way, which will easily bottleneck
-    on CPU for computing hashes when using >200 MiB/s SSD/NVMe drives.
+- Works in a simple sequential single-threaded way, which can bottleneck
+    on CPU for computing hashes when using >400 MiB/s SSD/NVMe drives.
 
     Can be improved rather easily by putting a fixed-size thread-pool between
     sequential reader/writer parts, which will hash/match read data buffers in parallel.
