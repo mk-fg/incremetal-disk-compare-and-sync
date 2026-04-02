@@ -225,6 +225,7 @@ look at those first.
 
     It's possible to `rsync -S` a sparse file delta, or use path on a network
     filesystem as a sync destination, but there's nothing beyond that.
+    [wyng] and backup tools operating with repository-type destinations often have this.
 
 - Compression - nothing is compressed/decompressed by the tool itself.
 
@@ -267,6 +268,7 @@ isn't strong enough security boundary around checking/copying fs internals).
 [borg]: https://www.borgbackup.org/
 [restic]: https://restic.net/
 [xdelta3]: http://xdelta.org/
+[wyng]: https://codeberg.org/tasket/wyng-backup
 [zsync]: http://zsync.moria.org.uk/
 [bittorrent]: https://en.wikipedia.org/wiki/BitTorrent
 [foxing]: https://codeberg.org/aenertia/foxing
